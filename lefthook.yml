@@ -1,0 +1,40 @@
+# https://lefthook.dev/configuration/
+# Fast checks run on commit; slower ones on push. CI runs everything regardless.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: rustfmt
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
+
+    - name: frontend lint
+      root: apps/desktop/
+      glob: "*.{ts,vue}"
+      run: pnpm exec oxlint {staged_files} && pnpm exec eslint {staged_files}
+
+    - name: prettier
+      root: apps/desktop/
+      glob: "*.{ts,vue,css}"
+      run: pnpm exec prettier --check {staged_files}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: clippy
+      glob: "*.{rs,toml}"
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+    - name: cargo test
+      glob: "*.{rs,toml}"
+      run: cargo test --workspace
+
+    - name: frontend type-check and tests
+      root: apps/desktop/
+      glob: "*.{ts,vue}"
+      run: pnpm type-check && pnpm test
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}

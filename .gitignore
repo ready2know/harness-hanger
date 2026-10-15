@@ -32,7 +32,6 @@ dist-ssr
 *.sw?
 
 .claude
-docs
 reference
 CLAUDE.md
 AGENTS.md
@@ -40,3 +39,6 @@ AGENTS.md
 
 .playwright-mcp
 .pr-lens
+
+# Rust
+/target/

@@ -1,0 +1,25 @@
+[package]
+name = "hanger-desktop"
+description = "Desktop app of harness-hanger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lib]
+name = "hanger_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+hanger-core.workspace = true
+log = "0.4"
+tauri = { version = "2.12.4", features = [] }
+tauri-plugin-log = "2.10.1"
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+{
+  "name": "harness-hanger",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @harness-hanger/desktop tauri dev",
+    "build": "pnpm --filter @harness-hanger/desktop tauri build",
+    "lint": "pnpm --filter @harness-hanger/desktop lint",
+    "format": "pnpm --filter @harness-hanger/desktop format",
+    "test": "pnpm --filter @harness-hanger/desktop test",
+    "type-check": "pnpm --filter @harness-hanger/desktop type-check"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "lefthook": "^2.2.2"
+  }
+}

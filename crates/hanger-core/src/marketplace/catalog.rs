@@ -722,7 +722,7 @@ mod tests {
             }
         );
         assert_eq!(imported.name.as_deref(), Some("acme"));
-        let origin = Command::new("git")
+        let origin = git::detach(&mut Command::new("git"))
             .args(["remote", "get-url", "origin"])
             .current_dir(&imported.root)
             .output()
@@ -848,7 +848,7 @@ mod tests {
             &["add", "."],
             &["commit", "--quiet", "-m", "init"],
         ] {
-            let status = Command::new("git")
+            let status = git::detach(&mut Command::new("git"))
                 .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
                 .args(args)
                 .current_dir(dir)

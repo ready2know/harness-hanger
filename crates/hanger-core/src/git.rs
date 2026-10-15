@@ -74,8 +74,40 @@ fn describe_failure(stderr: &str) -> String {
     stderr.trim().to_owned()
 }
 
+/// The variables that tie git to one repository, as `git rev-parse --local-env-vars` lists them.
+///
+/// Git sets some of them for the hooks it runs. A git run from a hook, for instance by
+/// `cargo test` in `pre-push`, would otherwise work on that repository instead of the one in its
+/// working directory.
+const LOCAL_ENV_VARS: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// Makes `command` find its repository from its working directory or arguments only.
+pub(crate) fn detach(command: &mut Command) -> &mut Command {
+    for name in LOCAL_ENV_VARS {
+        command.env_remove(name);
+    }
+    command
+}
+
 fn git() -> Command {
     let mut command = process::background("git");
+    detach(&mut command);
     // Fail instead of asking for credentials, which the desktop app has nowhere to show.
     // Saved credentials still work. An empty GIT_ASKPASS also stops git from trying
     // `core.askPass` and SSH_ASKPASS.
@@ -95,15 +127,36 @@ mod tests {
 
     use super::*;
 
-    fn run_git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
+    /// Runs git in `dir` for a test, and returns what it printed.
+    fn run_git(dir: &Path, args: &[&str]) -> String {
+        let output = detach(&mut Command::new("git"))
             .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
             .args(args)
             .current_dir(dir)
             .output()
-            .unwrap()
-            .status;
-        assert!(status.success(), "git {args:?} failed");
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn ignores_the_repository_that_the_environment_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let named = tmp.path().join("named");
+        let own = tmp.path().join("own");
+        fs::create_dir(&named).unwrap();
+        fs::create_dir(&own).unwrap();
+        run_git(&named, &["init", "--quiet"]);
+
+        // As in a git hook, which names the repository that runs it.
+        let status = detach(Command::new("git").env("GIT_DIR", named.join(".git")))
+            .args(["init", "--quiet"])
+            .current_dir(&own)
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        assert!(own.join(".git").is_dir());
     }
 
     #[test]
@@ -123,21 +176,14 @@ mod tests {
         shallow_clone(origin.to_str().unwrap(), &dest).unwrap();
 
         assert_eq!(fs::read_to_string(dest.join("README.md")).unwrap(), "hello");
-        let shallow = Command::new("git")
-            .args(["rev-parse", "--is-shallow-repository"])
-            .current_dir(&dest)
-            .output()
-            .unwrap();
-        assert_eq!(String::from_utf8_lossy(&shallow.stdout).trim(), "true");
+        assert_eq!(
+            run_git(&dest, &["rev-parse", "--is-shallow-repository"]),
+            "true"
+        );
 
         set_origin(&dest, "https://github.com/acme/tools.git").unwrap();
-        let origin = Command::new("git")
-            .args(["remote", "get-url", "origin"])
-            .current_dir(&dest)
-            .output()
-            .unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&origin.stdout).trim(),
+            run_git(&dest, &["remote", "get-url", "origin"]),
             "https://github.com/acme/tools.git"
         );
     }

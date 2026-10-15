@@ -83,6 +83,32 @@ describe('CatalogComponentsView', () => {
     expect(wrapper.get<HTMLInputElement>('input[aria-label="Search"]').element.value).toBe('')
   })
 
+  it('shows the skills a page at a time, and starts again at the first page on a new search', async () => {
+    const skills = Array.from({ length: 30 }, (_, index) => ({
+      name: `skill-${String(index).padStart(2, '0')}`,
+      description: 'A skill.',
+      path: `/m/skill-${index}/SKILL.md`,
+    }))
+    const review = catalogPlugins[0]!
+    vi.mocked(listCatalogPlugins).mockResolvedValue({
+      plugins: [{ ...review, plugin: { ...review.plugin, skills } }],
+      unreadable: [],
+    })
+    const wrapper = await mountView('skills')
+    expect(rows(wrapper)).toHaveLength(10)
+
+    await wrapper
+      .findAll('[data-slot="pagination-item"]')
+      .find((item) => item.text() === '3')!
+      .trigger('click')
+    expect(rows(wrapper).map((row) => row.name)).toEqual(
+      skills.slice(20).map((skill) => skill.name),
+    )
+
+    await wrapper.get('input[aria-label="Search"]').setValue('skill-')
+    expect(rows(wrapper)[0]!.name).toBe('skill-00')
+  })
+
   it('points to the Marketplaces page when there is nothing to list', async () => {
     vi.mocked(listCatalogPlugins).mockResolvedValue({ plugins: [], unreadable: [] })
 

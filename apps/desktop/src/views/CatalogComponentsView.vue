@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import CatalogEmpty from '@/components/CatalogEmpty.vue'
 import CatalogFilters from '@/components/CatalogFilters.vue'
+import PagedList from '@/components/PagedList.vue'
 import PluginStatusBadge from '@/components/PluginStatusBadge.vue'
 import UnreadableNotice from '@/components/UnreadableNotice.vue'
 import { useCatalogFilter, useCatalogPlugins } from '@/composables/useCatalogPlugins'
@@ -76,46 +77,53 @@ const title = computed(() => (props.kind === 'skills' ? 'Skills' : 'Agents'))
       <p v-if="shown.length === 0" class="text-muted-foreground py-6 text-center">
         No {{ kind }} match.
       </p>
-      <ul v-else class="divide-y rounded-xl border">
-        <li
-          v-for="(row, index) in shown"
-          :key="`${index}/${row.marketplaceId}/${row.plugin}/${row.component.name}`"
-          class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
-        >
-          <div class="flex items-center justify-between gap-3">
-            <!-- The link covers the whole row; the links and badge below sit above it. -->
-            <RouterLink
-              :to="row.to"
-              class="truncate font-mono text-sm font-medium after:absolute after:inset-0"
-              :title="row.component.path ?? undefined"
-            >
-              {{ row.component.name }}
-            </RouterLink>
-            <PluginStatusBadge :status="row.status" class="relative" />
-          </div>
-          <p v-if="row.component.description" class="text-muted-foreground line-clamp-2">
-            {{ row.component.description }}
-          </p>
-          <p class="text-muted-foreground text-xs">
-            {{ row.standalone ? 'Standalone in' : '' }}
-            <template v-if="!row.standalone">
+      <PagedList
+        v-else
+        :key="`${kind}|${query}|${status}`"
+        v-slot="{ items: visible }"
+        :items="shown"
+      >
+        <ul class="divide-y rounded-xl border">
+          <li
+            v-for="(row, index) in visible"
+            :key="`${index}/${row.marketplaceId}/${row.plugin}/${row.component.name}`"
+            class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <!-- The link covers the whole row; the links and badge below sit above it. -->
               <RouterLink
-                :to="pluginRoute(row.marketplaceId, row.plugin)"
+                :to="row.to"
+                class="truncate font-mono text-sm font-medium after:absolute after:inset-0"
+                :title="row.component.path ?? undefined"
+              >
+                {{ row.component.name }}
+              </RouterLink>
+              <PluginStatusBadge :status="row.status" class="relative" />
+            </div>
+            <p v-if="row.component.description" class="text-muted-foreground line-clamp-2">
+              {{ row.component.description }}
+            </p>
+            <p class="text-muted-foreground text-xs">
+              {{ row.standalone ? 'Standalone in' : '' }}
+              <template v-if="!row.standalone">
+                <RouterLink
+                  :to="pluginRoute(row.marketplaceId, row.plugin)"
+                  class="hover:text-foreground relative underline-offset-4 hover:underline"
+                >
+                  {{ row.plugin }}
+                </RouterLink>
+                ·
+              </template>
+              <RouterLink
+                :to="{ name: 'marketplace-preview', params: { id: row.marketplaceId } }"
                 class="hover:text-foreground relative underline-offset-4 hover:underline"
               >
-                {{ row.plugin }}
+                {{ row.marketplace }}
               </RouterLink>
-              ·
-            </template>
-            <RouterLink
-              :to="{ name: 'marketplace-preview', params: { id: row.marketplaceId } }"
-              class="hover:text-foreground relative underline-offset-4 hover:underline"
-            >
-              {{ row.marketplace }}
-            </RouterLink>
-          </p>
-        </li>
-      </ul>
+            </p>
+          </li>
+        </ul>
+      </PagedList>
     </template>
   </div>
 </template>

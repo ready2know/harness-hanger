@@ -12,6 +12,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 
 import ComponentList from '@/components/ComponentList.vue'
+import PagedList from '@/components/PagedList.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -157,7 +158,6 @@ const candidates = computed(() => {
     )
     .sort((a, b) => a.plugin.name.localeCompare(b.plugin.name))
 })
-const shownCandidates = computed(() => candidates.value.slice(0, 50))
 
 const scopeLabels: Record<Scope, string> = {
   user: 'Global',
@@ -328,10 +328,10 @@ const standaloneItems = computed(() => {
         <p v-else-if="candidates.length === 0" class="text-muted-foreground text-sm">
           {{ installQuery ? 'No plugins match.' : 'Nothing to install: add a marketplace first.' }}
         </p>
-        <template v-else>
+        <PagedList v-else :key="installQuery" v-slot="{ items: visible }" :items="candidates">
           <ul class="divide-y rounded-xl border">
             <li
-              v-for="entry in shownCandidates"
+              v-for="entry in visible"
               :key="`${entry.marketplaceId}/${entry.plugin.name}`"
               class="flex items-start gap-3 px-4 py-3"
             >
@@ -367,13 +367,7 @@ const standaloneItems = computed(() => {
               </Button>
             </li>
           </ul>
-          <p
-            v-if="candidates.length > shownCandidates.length"
-            class="text-muted-foreground text-xs"
-          >
-            And {{ candidates.length - shownCandidates.length }} more. Search to find one.
-          </p>
-        </template>
+        </PagedList>
       </section>
 
       <section class="flex flex-col gap-3" aria-labelledby="standalone-heading">

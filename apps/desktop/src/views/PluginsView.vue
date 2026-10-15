@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 
 import CatalogEmpty from '@/components/CatalogEmpty.vue'
 import CatalogFilters from '@/components/CatalogFilters.vue'
+import PagedList from '@/components/PagedList.vue'
 import PluginStatusBadge from '@/components/PluginStatusBadge.vue'
 import UnreadableNotice from '@/components/UnreadableNotice.vue'
 import { Badge } from '@/components/ui/badge'
@@ -54,41 +55,43 @@ const { query, status, counts, shown } = useCatalogFilter(rows, (entry) => [
       <p v-if="shown.length === 0" class="text-muted-foreground py-6 text-center">
         No plugins match.
       </p>
-      <ul v-else class="divide-y rounded-xl border">
-        <li
-          v-for="(entry, index) in shown"
-          :key="`${index}/${entry.marketplaceId}/${entry.plugin.name}`"
-          class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
-        >
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <!-- The link covers the whole row; the link and badge below sit above it. -->
-              <RouterLink
-                :to="pluginRoute(entry.marketplaceId, entry.plugin.name)"
-                class="font-medium after:absolute after:inset-0"
-              >
-                {{ entry.plugin.name }}
-              </RouterLink>
-              <Badge v-if="entry.plugin.version" variant="secondary">
-                {{ entry.plugin.version }}
-              </Badge>
+      <PagedList v-else :key="`${query}|${status}`" v-slot="{ items: visible }" :items="shown">
+        <ul class="divide-y rounded-xl border">
+          <li
+            v-for="(entry, index) in visible"
+            :key="`${index}/${entry.marketplaceId}/${entry.plugin.name}`"
+            class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex min-w-0 flex-wrap items-center gap-2">
+                <!-- The link covers the whole row; the link and badge below sit above it. -->
+                <RouterLink
+                  :to="pluginRoute(entry.marketplaceId, entry.plugin.name)"
+                  class="font-medium after:absolute after:inset-0"
+                >
+                  {{ entry.plugin.name }}
+                </RouterLink>
+                <Badge v-if="entry.plugin.version" variant="secondary">
+                  {{ entry.plugin.version }}
+                </Badge>
+              </div>
+              <PluginStatusBadge :status="entry.status" class="relative" />
             </div>
-            <PluginStatusBadge :status="entry.status" class="relative" />
-          </div>
-          <p v-if="entry.plugin.description" class="text-muted-foreground line-clamp-2">
-            {{ entry.plugin.description }}
-          </p>
-          <p class="text-muted-foreground text-xs">
-            <RouterLink
-              :to="{ name: 'marketplace-preview', params: { id: entry.marketplaceId } }"
-              class="hover:text-foreground relative underline-offset-4 hover:underline"
-            >
-              {{ entry.marketplace }}
-            </RouterLink>
-            · {{ pluginContents(entry.plugin) }}
-          </p>
-        </li>
-      </ul>
+            <p v-if="entry.plugin.description" class="text-muted-foreground line-clamp-2">
+              {{ entry.plugin.description }}
+            </p>
+            <p class="text-muted-foreground text-xs">
+              <RouterLink
+                :to="{ name: 'marketplace-preview', params: { id: entry.marketplaceId } }"
+                class="hover:text-foreground relative underline-offset-4 hover:underline"
+              >
+                {{ entry.marketplace }}
+              </RouterLink>
+              · {{ pluginContents(entry.plugin) }}
+            </p>
+          </li>
+        </ul>
+      </PagedList>
     </template>
   </div>
 </template>

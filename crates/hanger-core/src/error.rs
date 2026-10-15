@@ -38,6 +38,15 @@ pub enum Error {
 
     #[error("no marketplace with ID {0} in the catalog")]
     MarketplaceNotFound(i64),
+
+    #[error("harness-hanger cannot import from {0}")]
+    UnknownHarness(String),
+
+    #[error("{0} is not on this machine")]
+    HarnessMissing(String),
+
+    #[error("{item} cannot be imported: {reason}")]
+    NotImportable { item: String, reason: String },
 }
 
 impl Error {

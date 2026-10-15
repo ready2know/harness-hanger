@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
-use hanger_core::claude_code::{PluginStatus, UserPlugins};
+use hanger_core::harness::claude_code::UserPlugins;
+use hanger_core::harness::{Discovery, ImportItem, PluginStatus};
 use hanger_core::marketplace::{
     Catalog, CatalogPlugins, Component, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
     PluginSource,
@@ -27,6 +28,20 @@ enum Command {
     /// Browse plugin marketplaces in harness-hanger's own catalog. Claude Code does not see them.
     #[command(subcommand)]
     Marketplace(MarketplaceCommand),
+    /// Import marketplaces, with their plugins, and standalone skills from a harness, such as
+    /// Claude Code. With nothing named to import, lists what can be imported.
+    Import {
+        /// The harness, such as `claude-code`. Every harness is listed when it is left out.
+        harness: Option<String>,
+        /// Marketplaces to import, by the name the harness knows them by.
+        marketplaces: Vec<String>,
+        /// Import the skills, agents, and commands that the harness loads outside plugins.
+        #[arg(long)]
+        standalone: bool,
+        /// Import everything that can be imported and is not in the catalog yet.
+        #[arg(long, conflicts_with_all = ["marketplaces", "standalone"])]
+        all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -58,6 +73,164 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Info => info(cli.json),
         Command::Marketplace(command) => marketplace(command, cli.json),
+        Command::Import {
+            harness,
+            marketplaces,
+            standalone,
+            all,
+        } => import(harness, marketplaces, standalone, all, cli.json),
+    }
+}
+
+fn import(
+    harness: Option<String>,
+    marketplaces: Vec<String>,
+    standalone: bool,
+    all: bool,
+    json: bool,
+) -> Result<()> {
+    let catalog = Catalog::open_default()?;
+    let discoveries = catalog.import_candidates()?;
+    let known = || {
+        discoveries
+            .iter()
+            .map(|discovery| discovery.harness)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let find = |id: &str| {
+        discoveries
+            .iter()
+            .find(|discovery| discovery.harness == id)
+            .ok_or_else(|| anyhow!("unknown harness {id}; known harnesses: {}", known()))
+    };
+
+    if !all && !standalone && marketplaces.is_empty() {
+        let shown = match &harness {
+            Some(id) => vec![find(id)?],
+            None => discoveries.iter().collect(),
+        };
+        if json {
+            return print_json(&shown);
+        }
+        shown.into_iter().for_each(print_discovery);
+        return Ok(());
+    }
+
+    let Some(harness) = harness else {
+        bail!("name the harness to import from: {}", known());
+    };
+    let discovery = find(&harness)?;
+    let mut items: Vec<ImportItem> = if all {
+        discovery
+            .marketplaces
+            .iter()
+            .filter(|found| found.source.is_some() && !found.in_catalog)
+            .map(|found| ImportItem::Marketplace {
+                name: found.name.clone(),
+            })
+            .collect()
+    } else {
+        marketplaces
+            .into_iter()
+            .map(|name| ImportItem::Marketplace { name })
+            .collect()
+    };
+    let new_standalone = discovery
+        .standalone
+        .as_ref()
+        .is_some_and(|found| !found.in_catalog);
+    if standalone || (all && new_standalone) {
+        items.push(ImportItem::Standalone);
+    }
+    if items.is_empty() && !json {
+        println!("Nothing new to import from {}.", discovery.name);
+    }
+
+    let mut results = Vec::new();
+    let mut failed = 0;
+    for item in &items {
+        let label = match item {
+            ImportItem::Marketplace { name } => name.clone(),
+            ImportItem::Standalone => "standalone skills, agents, and commands".to_owned(),
+        };
+        if !json {
+            eprintln!("Importing {label}…");
+        }
+        match catalog.import(&harness, item) {
+            Ok(summary) => {
+                if !json {
+                    println!("Imported {label} (ID {})", summary.id);
+                }
+                results.push(serde_json::json!({ "item": label, "imported": summary }));
+            }
+            Err(error) => {
+                failed += 1;
+                if !json {
+                    println!("Not imported: {label}: {error}");
+                }
+                results.push(serde_json::json!({ "item": label, "error": error.to_string() }));
+            }
+        }
+    }
+    if json {
+        print_json(&results)?;
+    }
+    if failed > 0 {
+        bail!("{failed} of {} items were not imported", items.len());
+    }
+    Ok(())
+}
+
+fn print_discovery(discovery: &Discovery) {
+    let Some(config_dir) = &discovery.config_dir else {
+        println!(
+            "{} ({}): not found on this machine",
+            discovery.name, discovery.harness
+        );
+        return;
+    };
+    println!(
+        "{} ({}), {}",
+        discovery.name,
+        discovery.harness,
+        config_dir.display()
+    );
+    for found in &discovery.marketplaces {
+        let state = match (&found.source, found.in_catalog) {
+            (Some(_), true) => "in catalog",
+            (Some(_), false) => "new",
+            (None, _) => "cannot",
+        };
+        let detail = match (&found.source, &found.problem) {
+            (Some(source), _) => source.to_string(),
+            (None, Some(problem)) => problem.clone(),
+            (None, None) => String::new(),
+        };
+        let installed = if found.installed_plugins.is_empty() {
+            String::new()
+        } else {
+            format!(", installed: {}", found.installed_plugins.join(", "))
+        };
+        println!("  {state:<10}  {}  {detail}{installed}", found.name);
+    }
+    if let Some(found) = &discovery.standalone {
+        let state = if found.in_catalog {
+            "in catalog"
+        } else {
+            "new"
+        };
+        println!(
+            "  {state:<10}  standalone: {} skills, {} agents, {} commands",
+            found.skills, found.agents, found.commands
+        );
+    }
+    if !discovery.unmatched_plugins.is_empty() {
+        println!(
+            "  cannot      plugins whose marketplace {} does not describe: {}",
+            discovery.name,
+            discovery.unmatched_plugins.join(", ")
+        );
     }
 }
 
@@ -138,9 +311,13 @@ fn print_list(marketplaces: &[MarketplaceSummary]) {
     }
     for marketplace in marketplaces {
         let name = marketplace.name.as_deref().unwrap_or("(unreadable)");
+        let contents = match marketplace.source {
+            MarketplaceSource::Harness { .. } => "standalone".to_owned(),
+            _ => format!("{} plugins", marketplace.plugin_count),
+        };
         println!(
-            "{:>4}  {name}  {} plugins  {}",
-            marketplace.id, marketplace.plugin_count, marketplace.source
+            "{:>4}  {name}  {contents}  {}",
+            marketplace.id, marketplace.source
         );
         if let Some(error) = &marketplace.error {
             println!("      error: {error}");
@@ -172,7 +349,10 @@ fn print_details(details: &MarketplaceDetails) {
             .as_deref()
             .map(|version| format!(" {version}"))
             .unwrap_or_default();
-        println!("{}{version}", plugin.name);
+        match plugin.source {
+            PluginSource::Harness { .. } => println!("standalone"),
+            _ => println!("{}{version}", plugin.name),
+        }
         if let Some(description) = &plugin.description {
             println!("  {description}");
         }
@@ -220,10 +400,11 @@ fn print_plugins(catalog: &CatalogPlugins) {
                 plugin.commands.len()
             )
         };
-        println!(
-            "{status:<13}  {}@{}  {contents}",
-            plugin.name, entry.marketplace
-        );
+        let id = match plugin.source {
+            PluginSource::Harness { .. } => format!("standalone in {}", entry.marketplace),
+            _ => format!("{}@{}", plugin.name, entry.marketplace),
+        };
+        println!("{status:<13}  {id}  {contents}");
     }
 }
 

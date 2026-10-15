@@ -1,4 +1,5 @@
-use hanger_core::claude_code::UserPlugins;
+use hanger_core::harness::claude_code::UserPlugins;
+use hanger_core::harness::{Discovery, ImportItem};
 use hanger_core::marketplace::{
     Catalog, CatalogPlugins, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
 };
@@ -29,6 +30,21 @@ async fn marketplace_details(id: i64) -> Result<MarketplaceDetails, String> {
 #[tauri::command]
 async fn list_catalog_plugins() -> Result<CatalogPlugins, String> {
     with_catalog(|catalog| catalog.plugins(&UserPlugins::read(&paths::claude_config_dir()?)?)).await
+}
+
+/// What the harnesses have that the catalog can import.
+#[tauri::command]
+async fn import_candidates() -> Result<Vec<Discovery>, String> {
+    with_catalog(Catalog::import_candidates).await
+}
+
+/// Imports one thing from the harness `harness`. A clone can take a while.
+#[tauri::command]
+async fn import_from_harness(
+    harness: String,
+    item: ImportItem,
+) -> Result<MarketplaceSummary, String> {
+    with_catalog(move |catalog| catalog.import(&harness, &item)).await
 }
 
 #[tauri::command]
@@ -71,6 +87,8 @@ pub fn run() {
             add_marketplace,
             marketplace_details,
             list_catalog_plugins,
+            import_candidates,
+            import_from_harness,
             remove_marketplace,
         ])
         .run(tauri::generate_context!())

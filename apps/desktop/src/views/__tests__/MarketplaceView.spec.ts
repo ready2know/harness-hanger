@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { open as openFolderPicker } from '@tauri-apps/plugin-dialog'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { addMarketplace, listMarketplaces, type MarketplaceSummary } from '@/lib/api'
+import {
+  addMarketplace,
+  getImportCandidates,
+  listMarketplaces,
+  type MarketplaceSummary,
+} from '@/lib/api'
 import MarketplaceView from '../MarketplaceView.vue'
 
 vi.mock('@/lib/api', () => ({
   listMarketplaces: vi.fn<typeof listMarketplaces>(),
   addMarketplace: vi.fn<typeof addMarketplace>(),
+  getImportCandidates: vi.fn<typeof getImportCandidates>(() => new Promise(() => {})),
 }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn<typeof openFolderPicker>() }))
 
@@ -57,6 +63,14 @@ async function mountView() {
   return { wrapper, router }
 }
 
+async function clickButton(wrapper: VueWrapper, label: string) {
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text() === label)!
+    .trigger('click')
+  await flushPromises()
+}
+
 /** The add dialog is portalled to `<body>`. */
 function dialog() {
   return document.body.querySelector<HTMLElement>('[data-slot="dialog-content"]')
@@ -100,8 +114,7 @@ describe('MarketplaceView', () => {
     vi.mocked(addMarketplace).mockResolvedValue({ ...official, id: 7 })
     const { wrapper, router } = await mountView()
 
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
+    await clickButton(wrapper, 'Add marketplace')
     await setInput('anthropics/claude-plugins-official')
     dialog()!.querySelector('form')!.dispatchEvent(new Event('submit'))
     await flushPromises()
@@ -115,8 +128,7 @@ describe('MarketplaceView', () => {
     vi.mocked(openFolderPicker).mockResolvedValue('/src/my-marketplace')
     const { wrapper } = await mountView()
 
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
+    await clickButton(wrapper, 'Add marketplace')
     const browse = [...dialog()!.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('Browse'),
     )!
@@ -133,8 +145,7 @@ describe('MarketplaceView', () => {
     )
     const { wrapper, router } = await mountView()
 
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
+    await clickButton(wrapper, 'Add marketplace')
     await setInput('acme/missing')
     dialog()!.querySelector('form')!.dispatchEvent(new Event('submit'))
     await flushPromises()
@@ -151,8 +162,7 @@ describe('MarketplaceView', () => {
     vi.mocked(addMarketplace).mockReturnValue(new Promise((resolve) => (finish = resolve)))
     const { wrapper, router } = await mountView()
 
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
+    await clickButton(wrapper, 'Add marketplace')
     await setInput('  acme/tools  ')
     dialog()!.querySelector('form')!.dispatchEvent(new Event('submit'))
     await flushPromises()
@@ -171,13 +181,22 @@ describe('MarketplaceView', () => {
     vi.mocked(openFolderPicker).mockRejectedValue('dialog.open not allowed')
     const { wrapper } = await mountView()
 
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
+    await clickButton(wrapper, 'Add marketplace')
     ;[...dialog()!.querySelectorAll('button')]
       .find((b) => b.textContent?.includes('Browse'))!
       .click()
     await flushPromises()
 
     expect(dialog()!.querySelector('[role="alert"]')!.textContent).toContain('not allowed')
+  })
+
+  it('opens the import dialog', async () => {
+    vi.mocked(listMarketplaces).mockResolvedValue([])
+    const { wrapper } = await mountView()
+
+    await clickButton(wrapper, 'Import')
+
+    expect(dialog()!.textContent).toContain('Import from a harness')
+    expect(getImportCandidates).toHaveBeenCalled()
   })
 })

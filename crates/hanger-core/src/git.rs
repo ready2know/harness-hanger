@@ -5,7 +5,8 @@ use std::process::Command;
 
 use crate::{Error, Result};
 
-/// Clones the default branch of `url` into `dest`, without history.
+/// Clones the default branch of `url` into `dest`, without history. `url` can also be a local
+/// repository, such as a copy that a harness keeps.
 pub(crate) fn shallow_clone(url: &str, dest: &Path) -> Result<()> {
     let output = git()
         // Give up on a transfer that stalls below 1 KB/s for a minute.
@@ -15,7 +16,18 @@ pub(crate) fn shallow_clone(url: &str, dest: &Path) -> Result<()> {
             "-c",
             "http.lowSpeedTime=60",
         ])
-        .args(["clone", "--depth", "1", "--quiet", "--"])
+        // `--no-local` makes `--depth` apply to a local repository too. `--origin` keeps the
+        // remote's name whatever `clone.defaultRemoteName` says, so `set_origin` can find it.
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "--no-local",
+            "--origin",
+            "origin",
+            "--quiet",
+            "--",
+        ])
         .arg(url)
         .arg(dest)
         .output()
@@ -26,6 +38,22 @@ pub(crate) fn shallow_clone(url: &str, dest: &Path) -> Result<()> {
     Err(Error::Git(describe_failure(&String::from_utf8_lossy(
         &output.stderr,
     ))))
+}
+
+/// Points the `origin` remote of `repo` at `url`.
+pub(crate) fn set_origin(repo: &Path, url: &str) -> Result<()> {
+    let output = git()
+        .arg("-C")
+        .arg(repo)
+        .args(["remote", "set-url", "origin", url])
+        .output()
+        .map_err(|source| Error::Git(format!("cannot run git: {source}")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(Error::Git(
+        String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    ))
 }
 
 /// Explains the failure that git reports when a server asks for credentials that are not there.
@@ -91,14 +119,34 @@ mod tests {
         let origin = tmp.path().join("origin");
         fs::create_dir(&origin).unwrap();
         run_git(&origin, &["init", "--quiet"]);
-        fs::write(origin.join("README.md"), "hello").unwrap();
-        run_git(&origin, &["add", "."]);
-        run_git(&origin, &["commit", "--quiet", "-m", "init"]);
+        for content in ["first", "hello"] {
+            fs::write(origin.join("README.md"), content).unwrap();
+            run_git(&origin, &["add", "."]);
+            run_git(&origin, &["commit", "--quiet", "-m", content]);
+        }
 
+        // A local path, as when cloning from a copy that a harness keeps.
         let dest = tmp.path().join("clone");
         shallow_clone(origin.to_str().unwrap(), &dest).unwrap();
 
         assert_eq!(fs::read_to_string(dest.join("README.md")).unwrap(), "hello");
+        let shallow = Command::new("git")
+            .args(["rev-parse", "--is-shallow-repository"])
+            .current_dir(&dest)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&shallow.stdout).trim(), "true");
+
+        set_origin(&dest, "https://github.com/acme/tools.git").unwrap();
+        let origin = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(&dest)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&origin.stdout).trim(),
+            "https://github.com/acme/tools.git"
+        );
     }
 
     #[test]

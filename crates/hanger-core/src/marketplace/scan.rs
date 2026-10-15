@@ -60,6 +60,9 @@ pub enum PluginSource {
         /// The repository, URL, or package, when the manifest gives one.
         location: Option<String>,
     },
+    /// Not a plugin: the skills, agents, and commands that a harness loads for the user on their
+    /// own. `harness` is the adapter's ID.
+    Harness { harness: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +98,43 @@ pub(crate) fn read_manifest(root: &Path) -> Result<MarketplaceManifest> {
     serde_json::from_str(&text).map_err(|error| not_a_marketplace(format!("{MANIFEST}: {error}")))
 }
 
+/// The skills, agents, and commands that a harness loads for the user from `dir`, outside plugins,
+/// as a preview with one entry.
+///
+/// Symlinks are followed wherever they lead: the directory is the user's own, and people link
+/// skills into it from elsewhere. Symlink loops still end.
+pub(crate) fn standalone(dir: &Path, harness: &str, name: &str) -> Result<MarketplacePreview> {
+    let mut scan = Scan {
+        root: dir,
+        real_root: fs::canonicalize(dir).map_err(|source| Error::io(dir, source))?,
+        plugin_root: None,
+        follow_links_out: true,
+        warnings: Vec::new(),
+    };
+    let components = PluginPreview {
+        name: harness.to_owned(),
+        description: None,
+        version: None,
+        author: None,
+        category: None,
+        source: PluginSource::Harness {
+            harness: harness.to_owned(),
+        },
+        skills: scan.skills(dir, None, false),
+        agents: scan.agents(dir, None),
+        commands: scan.commands(dir, None),
+    };
+    Ok(MarketplacePreview {
+        name: name.to_owned(),
+        description: Some(format!(
+            "The skills, agents, and commands that {name} loads for your user, outside plugins."
+        )),
+        owner: None,
+        plugins: vec![components],
+        warnings: scan.warnings,
+    })
+}
+
 /// Lists everything the marketplace at `root` contains.
 pub fn preview(root: &Path) -> Result<MarketplacePreview> {
     let manifest = read_manifest(root)?;
@@ -102,6 +142,7 @@ pub fn preview(root: &Path) -> Result<MarketplacePreview> {
         root,
         real_root: fs::canonicalize(root).map_err(|source| Error::io(root, source))?,
         plugin_root: manifest.metadata.plugin_root.as_deref(),
+        follow_links_out: false,
         warnings: Vec::new(),
     };
     let plugins = manifest
@@ -132,9 +173,12 @@ pub fn preview(root: &Path) -> Result<MarketplacePreview> {
 
 struct Scan<'a> {
     root: &'a Path,
-    /// `root` with symlinks resolved. Nothing outside it is read.
+    /// `root` with symlinks resolved. Nothing outside it is read, unless `follow_links_out`.
     real_root: PathBuf,
     plugin_root: Option<&'a str>,
+    /// Whether symlinks may lead out of `root`. Only for the user's own directories, never for a
+    /// marketplace, which can come from anyone.
+    follow_links_out: bool,
     warnings: Vec<ScanWarning>,
 }
 
@@ -495,6 +539,9 @@ impl Scan<'_> {
     /// Whether `path` resolves inside the marketplace. A symlink in a cloned repository can point
     /// anywhere, such as the home directory.
     fn is_inside(&mut self, path: &Path) -> bool {
+        if self.follow_links_out {
+            return true;
+        }
         match fs::canonicalize(path) {
             Ok(real) if !real.starts_with(&self.real_root) => {
                 self.warn(path, "skipped, because it links outside the marketplace");
@@ -522,6 +569,15 @@ impl Scan<'_> {
             .filter(|path| !file_name(path).starts_with('.'))
             .collect();
         paths.sort();
+        paths.retain(|path| {
+            let broken = fs::symlink_metadata(path).is_ok_and(|meta| meta.is_symlink())
+                && fs::metadata(path).is_err();
+            if broken {
+                let target = fs::read_link(path).unwrap_or_default();
+                self.warn(path, format!("a broken link to {}", target.display()));
+            }
+            !broken
+        });
         paths
     }
 }
@@ -828,6 +884,22 @@ mod tests {
                 .iter()
                 .any(|warning| warning.message.contains("links outside the marketplace"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_broken_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills = tmp.path().join("skills");
+        fs::create_dir_all(skills.join("real")).unwrap();
+        fs::write(skills.join("real/SKILL.md"), "Real.").unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("moved"), skills.join("gone")).unwrap();
+
+        let preview = standalone(tmp.path(), "test", "Test").unwrap();
+
+        assert_eq!(names(&preview.plugins[0].skills), ["real"]);
+        assert_eq!(preview.warnings.len(), 1);
+        assert!(preview.warnings[0].message.starts_with("a broken link to"));
     }
 
     #[test]

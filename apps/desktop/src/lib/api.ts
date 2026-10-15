@@ -12,7 +12,10 @@ export function getAppInfo(): Promise<AppInfo> {
 
 /** Mirrors `hanger_core::marketplace::MarketplaceSource`. */
 export type MarketplaceSource =
-  { kind: 'github'; owner: string; repo: string } | { kind: 'local'; path: string }
+  | { kind: 'github'; owner: string; repo: string }
+  | { kind: 'local'; path: string }
+  /** A harness's own skills, agents, and commands, read in place. `harness` is its ID. */
+  | { kind: 'harness'; harness: string }
 
 /** Mirrors `hanger_core::marketplace::MarketplaceSummary`. */
 export interface MarketplaceSummary {
@@ -35,7 +38,10 @@ export interface Component {
 
 /** Mirrors `hanger_core::marketplace::PluginSource`. */
 export type PluginSource =
-  { kind: 'local'; path: string } | { kind: 'external'; source: string; location: string | null }
+  | { kind: 'local'; path: string }
+  | { kind: 'external'; source: string; location: string | null }
+  /** Not a plugin: the components that a harness loads for the user on their own. */
+  | { kind: 'harness'; harness: string }
 
 /** Mirrors `hanger_core::marketplace::PluginPreview`. */
 export interface PluginPreview {
@@ -107,6 +113,50 @@ export interface CatalogPlugins {
 /** Every plugin in the catalog's marketplaces, with its status in Claude Code. */
 export function listCatalogPlugins(): Promise<CatalogPlugins> {
   return invoke<CatalogPlugins>('list_catalog_plugins')
+}
+
+/** Mirrors `hanger_core::harness::FoundMarketplace`. */
+export interface FoundMarketplace {
+  name: string
+  /** `null` when the catalog cannot use its kind of source; `problem` says why. */
+  source: MarketplaceSource | null
+  problem: string | null
+  installedPlugins: string[]
+  inCatalog: boolean
+}
+
+/** Mirrors `hanger_core::harness::FoundStandalone`. */
+export interface FoundStandalone {
+  source: MarketplaceSource
+  path: string
+  skills: number
+  agents: number
+  commands: number
+  inCatalog: boolean
+}
+
+/** Mirrors `hanger_core::harness::Discovery`: what one harness has to import. */
+export interface Discovery {
+  harness: string
+  name: string
+  /** `null` when the harness is not on this machine. */
+  configDir: string | null
+  marketplaces: FoundMarketplace[]
+  standalone: FoundStandalone | null
+  /** `plugin@marketplace` IDs whose marketplace the harness does not describe. */
+  unmatchedPlugins: string[]
+}
+
+/** Mirrors `hanger_core::harness::ImportItem`. */
+export type ImportItem = { kind: 'marketplace'; name: string } | { kind: 'standalone' }
+
+export function getImportCandidates(): Promise<Discovery[]> {
+  return invoke<Discovery[]>('import_candidates')
+}
+
+/** Imports one item from a harness. A marketplace's clone can take a while. */
+export function importFromHarness(harness: string, item: ImportItem): Promise<MarketplaceSummary> {
+  return invoke<MarketplaceSummary>('import_from_harness', { harness, item })
 }
 
 export function removeMarketplace(id: number): Promise<void> {

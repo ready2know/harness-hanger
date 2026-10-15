@@ -13,6 +13,9 @@ pub enum MarketplaceSource {
     GitHub { owner: String, repo: String },
     /// A directory on this machine, such as a local clone. It is read in place.
     Local { path: PathBuf },
+    /// The skills, agents, and commands that a harness loads for the user outside plugins, such as
+    /// those in `~/.claude`. They are read in place. `harness` is the adapter's ID.
+    Harness { harness: String },
 }
 
 impl MarketplaceSource {
@@ -44,6 +47,7 @@ impl MarketplaceSource {
         match self {
             Self::GitHub { .. } => "github",
             Self::Local { .. } => "local",
+            Self::Harness { .. } => "harness",
         }
     }
 
@@ -54,6 +58,7 @@ impl MarketplaceSource {
                 .to_str()
                 .map(str::to_owned)
                 .ok_or_else(|| Error::InvalidSource(path.display().to_string())),
+            Self::Harness { harness } => Ok(harness.clone()),
         }
     }
 
@@ -64,6 +69,7 @@ impl MarketplaceSource {
             "local" => Some(Self::Local {
                 path: location.into(),
             }),
+            "harness" if is_harness_id(&location) => Some(Self::Harness { harness: location }),
             _ => None,
         }
     }
@@ -74,8 +80,16 @@ impl fmt::Display for MarketplaceSource {
         match self {
             Self::GitHub { owner, repo } => write!(f, "github.com/{owner}/{repo}"),
             Self::Local { path } => write!(f, "{}", path.display()),
+            Self::Harness { harness } => write!(f, "{harness} user directory"),
         }
     }
+}
+
+fn is_harness_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 const GITHUB_PREFIXES: &[&str] = &[
@@ -219,11 +233,19 @@ mod tests {
             MarketplaceSource::Local {
                 path: "/srv/market".into(),
             },
+            MarketplaceSource::Harness {
+                harness: "claude-code".into(),
+            },
         ] {
             let restored =
                 MarketplaceSource::from_row(source.kind(), source.location().unwrap()).unwrap();
             assert_eq!(restored, source);
         }
+    }
+
+    #[test]
+    fn skips_harness_rows_with_an_id_that_is_not_one() {
+        assert_eq!(MarketplaceSource::from_row("harness", "../x".into()), None);
     }
 
     #[test]

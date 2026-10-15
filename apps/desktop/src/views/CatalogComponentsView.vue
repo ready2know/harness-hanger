@@ -19,6 +19,7 @@ const rows = computed(() =>
       entry.plugin[props.kind].map((component) => ({
         component,
         plugin: entry.plugin.name,
+        standalone: entry.plugin.source.kind === 'harness',
         marketplace: entry.marketplace,
         marketplaceId: entry.marketplaceId,
         status: entry.status,
@@ -44,8 +45,8 @@ const title = computed(() => (props.kind === 'skills' ? 'Skills' : 'Agents'))
     <header class="flex flex-col gap-1">
       <h1 class="text-2xl font-semibold">{{ title }}</h1>
       <p class="text-muted-foreground text-sm">
-        The {{ kind }} in the marketplaces you added. Claude Code loads one when its plugin is
-        enabled for your user.
+        The {{ kind }} in your catalog. Claude Code loads a plugin's {{ kind }} when the plugin is
+        enabled for your user, and standalone {{ kind }} always.
       </p>
     </header>
 
@@ -87,7 +88,7 @@ const title = computed(() => (props.kind === 'skills' ? 'Skills' : 'Agents'))
             {{ row.component.description }}
           </p>
           <p class="text-muted-foreground text-xs">
-            {{ row.plugin }} ·
+            {{ row.standalone ? 'Standalone in' : `${row.plugin} ·` }}
             <RouterLink
               :to="{ name: 'marketplace-preview', params: { id: row.marketplaceId } }"
               class="hover:text-foreground underline-offset-4 hover:underline"

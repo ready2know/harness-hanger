@@ -5,18 +5,21 @@ use std::path::{Component as PathPart, Path, PathBuf};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 use serde::Serialize;
 
-use super::scan::{self, MarketplacePreview, PluginPreview};
+use super::scan::{self, MarketplacePreview, PluginPreview, PluginSource};
 use super::source::MarketplaceSource;
-use crate::claude_code::{PluginStatus, UserPlugins};
+use crate::harness::claude_code::UserPlugins;
+use crate::harness::{self, Discovery, HarnessAdapter, ImportItem, PluginStatus};
 use crate::{Error, Result, git, paths, store};
 
 /// The marketplaces a person added to harness-hanger, kept in its own database.
 ///
 /// This catalog is separate from Claude Code: adding a marketplace here does not register it with
 /// the harness. GitHub sources are cloned into the data directory; local ones are read in place.
+/// The catalog can also hold a harness's own skills, agents, and commands, read in place.
 pub struct Catalog {
     connection: Connection,
     data_dir: PathBuf,
+    adapters: Vec<Box<dyn HarnessAdapter>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,11 +29,13 @@ pub struct MarketplaceSummary {
     pub source: MarketplaceSource,
     /// When it was added, as an RFC 3339 UTC timestamp.
     pub added_at: String,
-    /// Where the marketplace is read from: the clone of a GitHub source, or the local directory.
+    /// Where the marketplace is read from: the clone of a GitHub source, the local directory, or
+    /// the harness's directory.
     pub root: PathBuf,
     /// From the manifest. `None` when `error` is set.
     pub name: Option<String>,
     pub description: Option<String>,
+    /// Always 0 for a harness's own components, which are not plugins.
     pub plugin_count: usize,
     /// Why the manifest cannot be read, for example because a local directory was moved.
     pub error: Option<String>,
@@ -79,12 +84,20 @@ impl Catalog {
         Ok(Self {
             connection,
             data_dir,
+            adapters: harness::adapters(),
         })
     }
 
     /// Opens the catalog in the default [data directory](paths::data_dir).
     pub fn open_default() -> Result<Self> {
         Self::open(paths::data_dir()?)
+    }
+
+    /// Uses `adapters` instead of [`harness::adapters`], such as fixtures in tests.
+    #[must_use]
+    pub fn with_adapters(mut self, adapters: Vec<Box<dyn HarnessAdapter>>) -> Self {
+        self.adapters = adapters;
+        self
     }
 
     pub fn list(&self) -> Result<Vec<MarketplaceSummary>> {
@@ -117,6 +130,76 @@ impl Catalog {
 
     /// Adds a marketplace. A GitHub source is cloned, which can take a while.
     pub fn add(&self, source: &MarketplaceSource) -> Result<MarketplaceSummary> {
+        self.add_from(source, None)
+    }
+
+    /// What the harnesses have that the catalog can import, and which of it the catalog has.
+    pub fn import_candidates(&self) -> Result<Vec<Discovery>> {
+        self.adapters
+            .iter()
+            .map(|adapter| {
+                let mut discovery = adapter.discover()?;
+                for marketplace in &mut discovery.marketplaces {
+                    let Some(source) = &marketplace.source else {
+                        continue;
+                    };
+                    // Someone may have added the harness's copy as a local directory before.
+                    let copy_in_catalog = match &marketplace.local_copy {
+                        Some(path) => {
+                            self.contains(&MarketplaceSource::Local { path: path.clone() })?
+                        }
+                        None => false,
+                    };
+                    marketplace.in_catalog = self.contains(source)? || copy_in_catalog;
+                }
+                if let Some(standalone) = &mut discovery.standalone {
+                    standalone.in_catalog = self.contains(&standalone.source)?;
+                }
+                Ok(discovery)
+            })
+            .collect()
+    }
+
+    /// Imports one thing that the harness `harness` has. A GitHub marketplace is cloned from the
+    /// copy that the harness keeps, when there is one, so that no network is needed.
+    pub fn import(&self, harness: &str, item: &ImportItem) -> Result<MarketplaceSummary> {
+        let adapter = self.adapter(harness)?;
+        let discovery = adapter.discover()?;
+        let not_importable = |item: &str, reason: String| Error::NotImportable {
+            item: item.to_owned(),
+            reason,
+        };
+        match item {
+            ImportItem::Standalone => {
+                let found = discovery.standalone.ok_or_else(|| {
+                    not_importable(
+                        &format!("{}'s own skills, agents, and commands", adapter.name()),
+                        "there are none".into(),
+                    )
+                })?;
+                self.add(&found.source)
+            }
+            ImportItem::Marketplace { name } => {
+                let found = discovery
+                    .marketplaces
+                    .into_iter()
+                    .find(|marketplace| &marketplace.name == name)
+                    .ok_or_else(|| {
+                        not_importable(name, format!("{} does not know it", adapter.name()))
+                    })?;
+                let source = found
+                    .source
+                    .ok_or_else(|| not_importable(name, found.problem.unwrap_or_default()))?;
+                self.add_from(&source, found.local_copy.as_deref())
+            }
+        }
+    }
+
+    fn add_from(
+        &self,
+        source: &MarketplaceSource,
+        local_copy: Option<&Path>,
+    ) -> Result<MarketplaceSummary> {
         // The entry is claimed before the clone, so that the CLI and the app cannot both clone
         // the same source into one directory.
         let inserted = self.connection.execute(
@@ -133,13 +216,17 @@ impl Catalog {
         };
         let id = self.connection.last_insert_rowid();
 
+        let root = self.root(source);
         let fetched = match source {
             MarketplaceSource::GitHub { owner, repo } => clone(
+                local_copy,
                 &format!("https://github.com/{owner}/{repo}.git"),
                 &self.clones_dir().join(format!(".adding-{id}")),
-                &self.root(source),
+                &root,
             ),
-            MarketplaceSource::Local { path } => scan::read_manifest(path).map(drop),
+            MarketplaceSource::Local { .. } | MarketplaceSource::Harness { .. } => {
+                self.read(source, &root).map(drop)
+            }
         };
         if let Err(error) = fetched {
             self.connection
@@ -153,13 +240,14 @@ impl Catalog {
     pub fn details(&self, id: i64) -> Result<MarketplaceDetails> {
         let summary = self.get(id)?;
         // Fails only when the manifest cannot be read, which `summary.error` already reports.
-        let preview = scan::preview(&summary.root).ok();
+        let preview = self.read(&summary.source, &summary.root).ok();
         Ok(MarketplaceDetails { summary, preview })
     }
 
     /// Every plugin of the catalog's marketplaces, with its status in Claude Code.
     ///
-    /// The status matches plugins by name and marketplace name, as Claude Code does.
+    /// The status matches plugins by name and marketplace name, as Claude Code does. A harness's
+    /// own skills, agents, and commands are always enabled: it loads them for the user.
     pub fn plugins(&self, claude: &UserPlugins) -> Result<CatalogPlugins> {
         let mut plugins = Vec::new();
         let mut unreadable = Vec::new();
@@ -168,12 +256,15 @@ impl Catalog {
                 unreadable.push(summary);
                 continue;
             }
-            match scan::preview(&summary.root) {
+            match self.read(&summary.source, &summary.root) {
                 Ok(preview) => {
                     plugins.extend(preview.plugins.into_iter().map(|plugin| CatalogPlugin {
                         marketplace_id: summary.id,
                         marketplace: preview.name.clone(),
-                        status: claude.status(&plugin.name, &preview.name),
+                        status: match plugin.source {
+                            PluginSource::Harness { .. } => PluginStatus::Enabled,
+                            _ => claude.status(&plugin.name, &preview.name),
+                        },
                         plugin,
                     }));
                 }
@@ -190,7 +281,8 @@ impl Catalog {
         })
     }
 
-    /// Removes a marketplace and, for a GitHub source, its clone. A local directory is left as is.
+    /// Removes a marketplace and, for a GitHub source, its clone. A local directory, and a
+    /// harness's directory, are left as they are.
     pub fn remove(&self, id: i64) -> Result<()> {
         let summary = self.get(id)?;
         // The clone goes first, so that a failure keeps the entry and removing can be retried.
@@ -200,6 +292,41 @@ impl Catalog {
         self.connection
             .execute("DELETE FROM marketplace WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    fn contains(&self, source: &MarketplaceSource) -> Result<bool> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT 1 FROM marketplace WHERE kind = ?1 AND location = ?2",
+                params![source.kind(), source.location()?],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    fn adapter(&self, id: &str) -> Result<&dyn HarnessAdapter> {
+        self.adapters
+            .iter()
+            .map(Box::as_ref)
+            .find(|adapter| adapter.id() == id)
+            .ok_or_else(|| Error::UnknownHarness(id.to_owned()))
+    }
+
+    /// Everything that an entry contains.
+    fn read(&self, source: &MarketplaceSource, root: &Path) -> Result<MarketplacePreview> {
+        match source {
+            MarketplaceSource::Harness { harness } => {
+                let adapter = self.adapter(harness)?;
+                adapter
+                    .standalone()
+                    .ok_or_else(|| Error::HarnessMissing(adapter.name().to_owned()))?
+            }
+            MarketplaceSource::GitHub { .. } | MarketplaceSource::Local { .. } => {
+                scan::preview(root)
+            }
+        }
     }
 
     fn clones_dir(&self) -> PathBuf {
@@ -234,6 +361,11 @@ impl Catalog {
         match source {
             MarketplaceSource::GitHub { owner, repo } => self.clones_dir().join(owner).join(repo),
             MarketplaceSource::Local { path } => path.clone(),
+            MarketplaceSource::Harness { harness } => self
+                .adapter(harness)
+                .ok()
+                .and_then(HarnessAdapter::standalone_dir)
+                .unwrap_or_default(),
         }
     }
 
@@ -249,14 +381,27 @@ impl Catalog {
             plugin_count: 0,
             error: None,
         };
-        match scan::read_manifest(&summary.root) {
-            Ok(manifest) => {
-                summary.description = manifest.description().map(str::to_owned);
-                summary.plugin_count = manifest
-                    .plugin_entries()
-                    .filter(|(_, entry)| entry.is_ok())
-                    .count();
-                summary.name = Some(manifest.name);
+        let read = match &summary.source {
+            // A harness's directory has no manifest. Its preview is small, so it is read whole.
+            MarketplaceSource::Harness { .. } => self
+                .read(&summary.source, &summary.root)
+                .map(|preview| (preview.name, preview.description, 0)),
+            MarketplaceSource::GitHub { .. } | MarketplaceSource::Local { .. } => {
+                scan::read_manifest(&summary.root).map(|manifest| {
+                    let description = manifest.description().map(str::to_owned);
+                    let plugin_count = manifest
+                        .plugin_entries()
+                        .filter(|(_, entry)| entry.is_ok())
+                        .count();
+                    (manifest.name, description, plugin_count)
+                })
+            }
+        };
+        match read {
+            Ok((name, description, plugin_count)) => {
+                summary.name = Some(name);
+                summary.description = description;
+                summary.plugin_count = plugin_count;
             }
             Err(error) => summary.error = Some(error.to_string()),
         }
@@ -279,11 +424,13 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<Row>> {
     )
 }
 
-/// Clones `url` into `staging`, checks that it is a marketplace, and moves it to `dest`.
+/// Clones a GitHub marketplace into `staging`, checks it, and moves it to `dest`.
 ///
-/// The caller holds the catalog entry for `dest`, so nothing else uses that directory. Nothing is
-/// left behind on failure.
-fn clone(url: &str, staging: &Path, dest: &Path) -> Result<()> {
+/// `local_copy` is a copy that a harness keeps: cloning from it is fast and works offline, and
+/// `origin` then points at `url`. Without it, or when it fails, the clone comes from `url`. The
+/// caller holds the catalog entry for `dest`, so nothing else uses that directory. Nothing is left
+/// behind on failure.
+fn clone(local_copy: Option<&Path>, url: &str, staging: &Path, dest: &Path) -> Result<()> {
     let result = (|| {
         // Leftovers of an add that was interrupted.
         remove_dir_if_exists(staging)?;
@@ -291,7 +438,16 @@ fn clone(url: &str, staging: &Path, dest: &Path) -> Result<()> {
         for dir in [staging.parent(), dest.parent()].into_iter().flatten() {
             fs::create_dir_all(dir).map_err(|source| Error::io(dir, source))?;
         }
-        git::shallow_clone(url, staging)?;
+        let from_copy = local_copy
+            .and_then(Path::to_str)
+            .is_some_and(|copy| git::shallow_clone(copy, staging).is_ok());
+        if from_copy {
+            git::set_origin(staging, url)?;
+        } else {
+            // A failed clone from the copy can leave a partial directory.
+            remove_dir_if_exists(staging)?;
+            git::shallow_clone(url, staging)?;
+        }
         scan::read_manifest(staging)?;
         fs::rename(staging, dest).map_err(|source| Error::io(dest, source))
     })();
@@ -506,6 +662,173 @@ mod tests {
         assert_ne!(second.id, first.id);
     }
 
+    /// A Claude Code config directory with a GitHub marketplace that it keeps a copy of, a local
+    /// marketplace, one it cannot describe, and standalone skills and agents.
+    fn claude_home(tmp: &Path) -> PathBuf {
+        let config = tmp.join("claude");
+        let copy = config.join("plugins/marketplaces/acme");
+        write_marketplace(&copy, "acme");
+        git_repo(&copy);
+        let local = tmp.join("local-market");
+        write_marketplace(&local, "local-market");
+        fs::create_dir_all(config.join("skills/one")).unwrap();
+        fs::write(config.join("skills/one/SKILL.md"), "---\nname: one\n---\n").unwrap();
+        fs::create_dir_all(config.join("agents")).unwrap();
+        fs::write(
+            config.join("agents/reviewer.md"),
+            "---\nname: reviewer\n---\n",
+        )
+        .unwrap();
+        let known = serde_json::json!({
+            // A repository that does not exist: the clone must come from the copy.
+            "acme": {
+                "source": { "source": "github", "repo": "hanger-test-no-such-owner/acme" },
+                "installLocation": copy
+            },
+            "local-market": { "source": { "source": "directory", "path": local } },
+            "packaged": { "source": { "source": "npm", "package": "x" } }
+        });
+        fs::write(
+            config.join("plugins/known_marketplaces.json"),
+            known.to_string(),
+        )
+        .unwrap();
+        config
+    }
+
+    fn import_catalog(data: &Path, claude: &Path) -> Catalog {
+        Catalog::open(data)
+            .unwrap()
+            .with_adapters(vec![Box::new(harness::ClaudeCode::new(claude))])
+    }
+
+    fn marketplace(name: &str) -> ImportItem {
+        ImportItem::Marketplace { name: name.into() }
+    }
+
+    #[test]
+    fn imports_a_github_marketplace_from_the_copy_the_harness_keeps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+
+        let imported = catalog.import("claude-code", &marketplace("acme")).unwrap();
+
+        assert_eq!(
+            imported.source,
+            MarketplaceSource::GitHub {
+                owner: "hanger-test-no-such-owner".into(),
+                repo: "acme".into()
+            }
+        );
+        assert_eq!(imported.name.as_deref(), Some("acme"));
+        let origin = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(&imported.root)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&origin.stdout).trim(),
+            "https://github.com/hanger-test-no-such-owner/acme.git"
+        );
+    }
+
+    #[test]
+    fn imports_a_local_marketplace_and_the_standalone_components() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+
+        let local = catalog
+            .import("claude-code", &marketplace("local-market"))
+            .unwrap();
+        let standalone = catalog
+            .import("claude-code", &ImportItem::Standalone)
+            .unwrap();
+
+        assert_eq!(local.root, tmp.path().join("local-market"));
+        assert_eq!(standalone.name.as_deref(), Some("Claude Code"));
+        assert_eq!(standalone.root, claude);
+        assert_eq!(standalone.plugin_count, 0);
+        let plugins = catalog.plugins(&UserPlugins::default()).unwrap().plugins;
+        let own = plugins
+            .iter()
+            .find(|entry| entry.marketplace_id == standalone.id)
+            .unwrap();
+        // The harness loads its own components for the user, so they are enabled.
+        assert_eq!(own.status, PluginStatus::Enabled);
+        assert_eq!(own.plugin.skills[0].name, "one");
+        assert_eq!(own.plugin.agents[0].name, "reviewer");
+
+        catalog.remove(standalone.id).unwrap();
+        assert!(claude.join("skills/one/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn marks_what_the_catalog_already_has() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+        catalog
+            .import("claude-code", &marketplace("local-market"))
+            .unwrap();
+
+        let discoveries = catalog.import_candidates().unwrap();
+
+        let discovery = &discoveries[0];
+        let in_catalog: Vec<_> = discovery
+            .marketplaces
+            .iter()
+            .map(|m| (m.name.as_str(), m.in_catalog))
+            .collect();
+        assert_eq!(
+            in_catalog,
+            [("acme", false), ("local-market", true), ("packaged", false)]
+        );
+        assert!(!discovery.standalone.as_ref().unwrap().in_catalog);
+    }
+
+    #[test]
+    fn counts_the_harness_copy_added_as_a_local_directory_as_in_the_catalog() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+        catalog
+            .add(&local(&claude.join("plugins/marketplaces/acme")))
+            .unwrap();
+
+        let discoveries = catalog.import_candidates().unwrap();
+
+        let acme = &discoveries[0].marketplaces[0];
+        assert_eq!(acme.name, "acme");
+        assert!(acme.in_catalog);
+    }
+
+    #[test]
+    fn explains_what_cannot_be_imported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+
+        for (harness, item, expected) in [
+            ("claude-code", marketplace("packaged"), "from a npm source"),
+            (
+                "claude-code",
+                marketplace("missing"),
+                "Claude Code does not know it",
+            ),
+            (
+                "cursor",
+                ImportItem::Standalone,
+                "cannot import from cursor",
+            ),
+        ] {
+            let error = catalog.import(harness, &item).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+        assert!(catalog.list().unwrap().is_empty());
+    }
+
     #[test]
     fn keeps_github_clones_in_the_data_directory() {
         let data = tempfile::tempdir().unwrap();
@@ -544,7 +867,7 @@ mod tests {
         let staging = tmp.path().join("clones/.adding-1");
         let dest = tmp.path().join("clones/acme/tools");
 
-        clone(origin.to_str().unwrap(), &staging, &dest).unwrap();
+        clone(None, origin.to_str().unwrap(), &staging, &dest).unwrap();
 
         assert_eq!(scan::read_manifest(&dest).unwrap().name, "cloned");
         assert!(!staging.exists());
@@ -560,7 +883,13 @@ mod tests {
         let staging = tmp.path().join("clones/.adding-1");
         let owner = tmp.path().join("clones/acme");
 
-        let error = clone(origin.to_str().unwrap(), &staging, &owner.join("tools")).unwrap_err();
+        let error = clone(
+            None,
+            origin.to_str().unwrap(),
+            &staging,
+            &owner.join("tools"),
+        )
+        .unwrap_err();
 
         assert!(matches!(error, Error::NotAMarketplace { .. }), "{error}");
         assert!(!staging.exists());

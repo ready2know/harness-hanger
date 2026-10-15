@@ -6,5 +6,6 @@ mod scan;
 mod source;
 
 pub use catalog::{Catalog, CatalogPlugin, CatalogPlugins, MarketplaceDetails, MarketplaceSummary};
+pub(crate) use scan::standalone;
 pub use scan::{Component, MarketplacePreview, PluginPreview, PluginSource, ScanWarning, preview};
 pub use source::MarketplaceSource;

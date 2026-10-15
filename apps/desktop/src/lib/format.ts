@@ -1,4 +1,4 @@
-import type { MarketplaceSource, PluginPreview, PluginStatus } from '@/lib/api'
+import type { MarketplaceSource, MarketplaceSummary, PluginPreview, PluginStatus } from '@/lib/api'
 
 /** `1 skill`, `3 skills`. */
 export function count(n: number, noun: string): string {
@@ -23,7 +23,19 @@ export function pluginContents(plugin: PluginPreview): string {
 }
 
 export function formatSource(source: MarketplaceSource): string {
-  return source.kind === 'github' ? `github.com/${source.owner}/${source.repo}` : source.path
+  switch (source.kind) {
+    case 'github':
+      return `github.com/${source.owner}/${source.repo}`
+    case 'local':
+      return source.path
+    case 'harness':
+      return `${source.harness} user directory`
+  }
+}
+
+/** Where a catalog entry comes from: its source, or the directory of a harness's own components. */
+export function formatLocation(summary: MarketplaceSummary): string {
+  return summary.source.kind === 'harness' ? summary.root : formatSource(summary.source)
 }
 
 /** `path` relative to `root` when it is inside it, else `path` unchanged. */

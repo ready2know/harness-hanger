@@ -127,6 +127,29 @@ describe('CatalogComponentsView', () => {
     expect(wrapper.findAll('li .font-mono')).toHaveLength(4)
   })
 
+  it("labels a harness's own skills as standalone", async () => {
+    vi.mocked(listCatalogPlugins).mockResolvedValue({
+      plugins: [
+        {
+          marketplaceId: 9,
+          marketplace: 'Claude Code',
+          status: 'enabled',
+          plugin: {
+            ...catalogPlugins[0]!.plugin,
+            name: 'claude-code',
+            source: { kind: 'harness', harness: 'claude-code' },
+          },
+        },
+      ],
+      unreadable: [],
+    })
+
+    const wrapper = await mountView('skills')
+
+    expect(wrapper.get('li').text()).toContain('Standalone in Claude Code')
+    expect(wrapper.get('li').text()).not.toContain('claude-code ·')
+  })
+
   it('shows why the catalog could not be read', async () => {
     vi.mocked(listCatalogPlugins).mockRejectedValue('settings.json: invalid JSON')
 

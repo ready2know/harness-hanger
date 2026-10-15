@@ -12,11 +12,15 @@ import { pluginContents } from '@/lib/format'
 
 const { plugins, unreadable, error } = useCatalogPlugins()
 
+// A harness's own skills, agents, and commands are not a plugin; the Skills and Agents pages show
+// them.
 const rows = computed(() =>
-  [...(plugins.value ?? [])].sort(
-    (a, b) =>
-      a.plugin.name.localeCompare(b.plugin.name) || a.marketplace.localeCompare(b.marketplace),
-  ),
+  (plugins.value ?? [])
+    .filter((entry) => entry.plugin.source.kind !== 'harness')
+    .sort(
+      (a, b) =>
+        a.plugin.name.localeCompare(b.plugin.name) || a.marketplace.localeCompare(b.marketplace),
+    ),
 )
 const { query, status, counts, shown } = useCatalogFilter(rows, (entry) => [
   entry.plugin.name,

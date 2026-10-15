@@ -2,8 +2,6 @@
 import {
   ArrowLeftIcon,
   ExternalLinkIcon,
-  FolderIcon,
-  GitBranchIcon,
   SearchIcon,
   TrashIcon,
   TriangleAlertIcon,
@@ -12,6 +10,7 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import ComponentList from '@/components/ComponentList.vue'
+import SourceIcon from '@/components/SourceIcon.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,7 +24,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getMarketplaceDetails, removeMarketplace, type MarketplaceDetails } from '@/lib/api'
-import { count, formatSource, pluginContents, relativePath } from '@/lib/format'
+import { count, formatLocation, pluginContents, relativePath } from '@/lib/format'
 
 const props = defineProps<{ id: number }>()
 
@@ -53,7 +52,10 @@ watch(
     removeOpen.value = false
     try {
       const loaded = await getMarketplaceDetails(id)
-      if (!stale) details.value = loaded
+      if (stale) return
+      details.value = loaded
+      // A harness's own components are not plugins, so there is no Plugins tab.
+      if (loaded.summary.source.kind === 'harness') tab.value = 'skills'
     } catch (e) {
       if (!stale) error.value = String(e)
     }
@@ -74,7 +76,12 @@ const shownPlugins = computed(() =>
 
 function componentsOf(kind: 'skills' | 'agents' | 'commands') {
   return plugins.value
-    .flatMap((plugin) => plugin[kind].map((component) => ({ component, plugin: plugin.name })))
+    .flatMap((plugin) =>
+      plugin[kind].map((component) => ({
+        component,
+        plugin: plugin.source.kind === 'harness' ? 'standalone' : plugin.name,
+      })),
+    )
     .filter(({ component }) => matches(component.name, component.description))
     .sort(
       (a, b) =>
@@ -130,13 +137,9 @@ async function remove() {
             {{ details.summary.description }}
           </p>
           <p class="text-muted-foreground flex items-center gap-1.5 font-mono text-xs">
-            <GitBranchIcon
-              v-if="details.summary.source.kind === 'github'"
-              class="size-3.5 shrink-0"
-            />
-            <FolderIcon v-else class="size-3.5 shrink-0" />
-            <span class="min-w-0 truncate" :title="formatSource(details.summary.source)">
-              {{ formatSource(details.summary.source) }}
+            <SourceIcon :source="details.summary.source" />
+            <span class="min-w-0 truncate" :title="formatLocation(details.summary)">
+              {{ formatLocation(details.summary) }}
             </span>
             <template v-if="details.preview?.owner">
               <span aria-hidden="true">·</span>
@@ -163,7 +166,9 @@ async function remove() {
       <Tabs v-else v-model="tab">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
-            <TabsTrigger value="plugins">Plugins {{ shownPlugins.length }}</TabsTrigger>
+            <TabsTrigger v-if="details.summary.source.kind !== 'harness'" value="plugins">
+              Plugins {{ shownPlugins.length }}
+            </TabsTrigger>
             <TabsTrigger value="skills">Skills {{ skills.length }}</TabsTrigger>
             <TabsTrigger value="agents">Agents {{ agents.length }}</TabsTrigger>
             <TabsTrigger value="commands">Commands {{ commands.length }}</TabsTrigger>
@@ -242,6 +247,10 @@ async function remove() {
             <DialogTitle>Remove {{ details.summary.name ?? 'this marketplace' }}?</DialogTitle>
             <DialogDescription v-if="details.summary.source.kind === 'github'">
               harness-hanger deletes its clone. You can add the marketplace again later.
+            </DialogDescription>
+            <DialogDescription v-else-if="details.summary.source.kind === 'harness'">
+              Only the catalog entry is removed. The skills, agents, and commands stay where they
+              are, and the harness keeps loading them.
             </DialogDescription>
             <DialogDescription v-else>
               Only the catalog entry is removed. The folder stays where it is.

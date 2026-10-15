@@ -3,10 +3,10 @@
 //! Every capability lives here. The CLI (`hanger-cli`) and the desktop app
 //! (`apps/desktop/src-tauri`) are thin adapters over this crate.
 
-pub mod claude_code;
 mod error;
 mod frontmatter;
 mod git;
+pub mod harness;
 mod info;
 pub mod marketplace;
 pub mod paths;

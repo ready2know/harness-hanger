@@ -71,4 +71,28 @@ describe('PluginsView', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('/src/moved')
     expect(wrapper.text()).not.toContain('No plugins yet')
   })
+
+  it("leaves out a harness's own components, which are not a plugin", async () => {
+    vi.mocked(listCatalogPlugins).mockResolvedValue({
+      plugins: [
+        ...catalogPlugins,
+        {
+          marketplaceId: 9,
+          marketplace: 'Claude Code',
+          status: 'enabled',
+          plugin: {
+            ...catalogPlugins[0]!.plugin,
+            name: 'claude-code',
+            source: { kind: 'harness', harness: 'claude-code' },
+          },
+        },
+      ],
+      unreadable: [],
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.findAll('li')).toHaveLength(4)
+    expect(wrapper.text()).not.toContain('claude-code')
+  })
 })

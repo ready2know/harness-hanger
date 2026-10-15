@@ -1,28 +1,34 @@
 <script setup lang="ts">
-import { FolderIcon, GitBranchIcon, PlusIcon, StoreIcon } from '@lucide/vue'
+import { DownloadIcon, PlusIcon, StoreIcon } from '@lucide/vue'
 import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import AddMarketplaceDialog from '@/components/AddMarketplaceDialog.vue'
+import ImportDialog from '@/components/ImportDialog.vue'
+import SourceIcon from '@/components/SourceIcon.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { listMarketplaces, type MarketplaceSummary } from '@/lib/api'
-import { count, formatSource } from '@/lib/format'
+import { count, formatLocation } from '@/lib/format'
 
 const router = useRouter()
 
 const marketplaces = ref<MarketplaceSummary[]>()
 const error = ref<string>()
 const addOpen = ref(false)
+const importOpen = ref(false)
 
-onMounted(async () => {
+async function load() {
   try {
     marketplaces.value = await listMarketplaces()
+    error.value = undefined
   } catch (e) {
     error.value = String(e)
   }
-})
+}
+
+onMounted(load)
 
 function openPreview(marketplace: MarketplaceSummary) {
   router.push({ name: 'marketplace-preview', params: { id: marketplace.id } })
@@ -38,10 +44,16 @@ function openPreview(marketplace: MarketplaceSummary) {
           Plugin marketplaces you added. Open one to see its plugins, skills, agents, and commands.
         </p>
       </div>
-      <Button v-if="error || marketplaces?.length" @click="addOpen = true">
-        <PlusIcon />
-        Add marketplace
-      </Button>
+      <div v-if="error || marketplaces?.length" class="flex shrink-0 gap-2">
+        <Button variant="outline" @click="importOpen = true">
+          <DownloadIcon />
+          Import
+        </Button>
+        <Button @click="addOpen = true">
+          <PlusIcon />
+          Add marketplace
+        </Button>
+      </div>
     </header>
 
     <p v-if="error" role="alert" class="text-destructive">{{ error }}</p>
@@ -55,13 +67,20 @@ function openPreview(marketplace: MarketplaceSummary) {
       <div class="flex flex-col gap-1">
         <h2 class="font-medium">No marketplaces yet</h2>
         <p class="text-muted-foreground max-w-sm text-sm">
-          Add one from GitHub or from a local clone to see what it contains.
+          Add one from GitHub or from a local clone, or import the ones a harness such as Claude
+          Code already has.
         </p>
       </div>
-      <Button @click="addOpen = true">
-        <PlusIcon />
-        Add marketplace
-      </Button>
+      <div class="flex gap-2">
+        <Button variant="outline" @click="importOpen = true">
+          <DownloadIcon />
+          Import
+        </Button>
+        <Button @click="addOpen = true">
+          <PlusIcon />
+          Add marketplace
+        </Button>
+      </div>
     </div>
 
     <ul v-else class="grid gap-3 md:grid-cols-2">
@@ -77,21 +96,22 @@ function openPreview(marketplace: MarketplaceSummary) {
                 <span class="min-w-0 truncate">
                   {{ marketplace.name ?? 'Unreadable marketplace' }}
                 </span>
-                <Badge v-if="!marketplace.error" variant="secondary">
-                  {{ count(marketplace.pluginCount, 'plugin') }}
-                </Badge>
+                <template v-if="!marketplace.error">
+                  <Badge v-if="marketplace.source.kind === 'harness'" variant="secondary">
+                    Standalone
+                  </Badge>
+                  <Badge v-else variant="secondary">
+                    {{ count(marketplace.pluginCount, 'plugin') }}
+                  </Badge>
+                </template>
               </CardTitle>
               <CardDescription class="flex flex-col gap-2">
                 <span
                   class="flex min-w-0 items-center gap-1.5 font-mono text-xs"
-                  :title="formatSource(marketplace.source)"
+                  :title="formatLocation(marketplace)"
                 >
-                  <GitBranchIcon
-                    v-if="marketplace.source.kind === 'github'"
-                    class="size-3.5 shrink-0"
-                  />
-                  <FolderIcon v-else class="size-3.5 shrink-0" />
-                  <span class="min-w-0 truncate">{{ formatSource(marketplace.source) }}</span>
+                  <SourceIcon :source="marketplace.source" />
+                  <span class="min-w-0 truncate">{{ formatLocation(marketplace) }}</span>
                 </span>
                 <span v-if="marketplace.error" class="text-destructive wrap-anywhere">
                   {{ marketplace.error }}
@@ -107,5 +127,6 @@ function openPreview(marketplace: MarketplaceSummary) {
     </ul>
 
     <AddMarketplaceDialog v-model:open="addOpen" @added="openPreview" />
+    <ImportDialog v-model:open="importOpen" @imported="load" />
   </div>
 </template>

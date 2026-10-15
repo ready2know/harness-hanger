@@ -96,15 +96,14 @@ watch(
 )
 
 /** Runs a change through Claude Code, then shows the state that it left. */
-async function change(pluginId: string, run: (projectId: number) => Promise<void>) {
+async function change(pluginId: string, run: () => Promise<void>) {
   const projectId = props.projectId
-  if (projectId === null) return
   const key = `${projectId}/${pluginId}`
   if (busy.value[key]) return
   busy.value[key] = true
   delete rowErrors.value[key]
   try {
-    await run(projectId)
+    await run()
   } catch (e) {
     rowErrors.value[key] = String(e)
   }
@@ -118,19 +117,23 @@ async function change(pluginId: string, run: (projectId: number) => Promise<void
   }
 }
 
+/** Switches a plugin in this project, or for the user on the Global page. */
 function toggle(plugin: ScopedPlugin, enabled: boolean) {
-  return change(plugin.id, (projectId) => setPluginEnabled(projectId, plugin.id, enabled))
+  const projectId = props.projectId
+  return change(plugin.id, () => setPluginEnabled(projectId, plugin.id, enabled))
 }
 
 function uninstall(plugin: ScopedPlugin) {
   confirming.value = undefined
-  return change(plugin.id, (projectId) => uninstallPlugin(projectId, plugin.id))
+  const projectId = props.projectId
+  if (projectId === null) return
+  return change(plugin.id, () => uninstallPlugin(projectId, plugin.id))
 }
 
 function install(entry: CatalogPlugin) {
-  return change(idOf(entry), (projectId) =>
-    installPlugin(projectId, entry.marketplaceId, entry.plugin.name),
-  )
+  const projectId = props.projectId
+  if (projectId === null) return
+  return change(idOf(entry), () => installPlugin(projectId, entry.marketplaceId, entry.plugin.name))
 }
 
 function idOf(entry: CatalogPlugin): string {
@@ -203,8 +206,9 @@ const standaloneItems = computed(() => {
         {{ projectId === null ? 'Global' : (project?.name ?? 'Project') }}
       </h1>
       <p v-if="projectId === null" class="text-muted-foreground text-sm">
-        What Claude Code loads for your user, in every project. To change it, use
-        <code>/plugin</code> in Claude Code, or switch a plugin off for one project on its page.
+        What Claude Code loads for your user, in every project. A switch here turns a plugin on or
+        off for your user; a project whose own settings switch it keeps its choice. To switch a
+        plugin for one project only, use that project's page.
       </p>
       <template v-else-if="project">
         <p class="text-muted-foreground truncate font-mono text-xs" :title="project.path">
@@ -271,23 +275,15 @@ const standaloneItems = computed(() => {
                 <TrashIcon />
               </Button>
               <Switch
-                v-if="projectId !== null"
                 :model-value="plugin.enabled"
                 :disabled="busy[keyOf(plugin.id)]"
-                :aria-label="`${plugin.name} on in this project`"
+                :aria-label="
+                  projectId === null
+                    ? `${plugin.name} on for your user`
+                    : `${plugin.name} on in this project`
+                "
                 @update:model-value="toggle(plugin, $event)"
               />
-              <Badge
-                v-else
-                :variant="plugin.enabled ? 'secondary' : 'outline'"
-                :class="
-                  plugin.enabled
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
-                    : 'text-muted-foreground'
-                "
-              >
-                {{ plugin.enabled ? 'Enabled' : 'Disabled' }}
-              </Badge>
             </div>
           </li>
         </ul>

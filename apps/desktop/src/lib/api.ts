@@ -280,8 +280,15 @@ export function getScopeState(project: number | null): Promise<ScopeState> {
   return invoke<ScopeState>('scope_state', { project })
 }
 
-/** Switches `plugin` (`plugin@marketplace`) on or off in a project, through Claude Code. */
-export function setPluginEnabled(project: number, plugin: string, enabled: boolean): Promise<void> {
+/**
+ * Switches `plugin` (`plugin@marketplace`) on or off through Claude Code: in a project, or for the
+ * user, in every project whose own settings do not decide it, when `project` is `null`.
+ */
+export function setPluginEnabled(
+  project: number | null,
+  plugin: string,
+  enabled: boolean,
+): Promise<void> {
   return invoke<void>('set_plugin_enabled', { project, plugin, enabled })
 }
 

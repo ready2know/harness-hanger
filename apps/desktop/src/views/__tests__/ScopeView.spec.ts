@@ -103,25 +103,39 @@ function row(wrapper: VueWrapper, name: string) {
 }
 
 describe('ScopeView', () => {
-  it('shows the global setup without changing it', async () => {
+  it('shows the global setup, and switches its plugins for the user', async () => {
     vi.mocked(getScopeState).mockResolvedValue({
       ...projectState,
       project: null,
       plugins: [
         plugin({ id: 'review@acme', name: 'review' }),
-        plugin({ id: 'docs@acme', name: 'docs', enabled: false }),
+        plugin({ id: 'docs@acme', name: 'docs', enabled: false, decidedBy: null }),
       ],
     })
+    vi.mocked(setPluginEnabled).mockResolvedValue()
 
     const wrapper = await mountView(null)
 
     expect(getScopeState).toHaveBeenCalledWith(null)
     expect(wrapper.get('h1').text()).toBe('Global')
-    expect(row(wrapper, 'review').text()).toContain('Enabled')
-    expect(row(wrapper, 'docs').text()).toContain('Disabled')
-    expect(wrapper.find('[role="switch"]').exists()).toBe(false)
+    const review = row(wrapper, 'review').get('[role="switch"]')
+    expect(review.attributes('aria-checked')).toBe('true')
+    expect(review.attributes('aria-label')).toBe('review on for your user')
+    expect(row(wrapper, 'docs').get('[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(row(wrapper, 'docs').text()).toContain('Off: no settings switch it on')
+    // A plugin installed for the user is not the Global page's to uninstall.
+    expect(row(wrapper, 'review').find('button[aria-label="Uninstall review"]').exists()).toBe(
+      false,
+    )
     expect(wrapper.find('section[aria-labelledby="install-heading"]').exists()).toBe(false)
     expect(listCatalogPlugins).not.toHaveBeenCalled()
+
+    await row(wrapper, 'docs').get('[role="switch"]').trigger('click')
+    await flushPromises()
+
+    expect(setPluginEnabled).toHaveBeenCalledWith(null, 'docs@acme', true)
+    expect(getScopeState).toHaveBeenCalledTimes(2)
+    expect(getScopeState).toHaveBeenLastCalledWith(null)
   })
 
   it("shows a project's plugins, where each comes from, and what decides it", async () => {

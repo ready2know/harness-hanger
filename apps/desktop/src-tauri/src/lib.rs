@@ -108,12 +108,20 @@ async fn scope_state(project: Option<i64>) -> Result<ScopeState, String> {
     .await
 }
 
-/// Switches `plugin` (`plugin@marketplace`) on or off in a project.
+/// Switches `plugin` (`plugin@marketplace`) on or off in a project, or for the user when
+/// `project` is `None`.
 #[tauri::command]
-async fn set_plugin_enabled(project: i64, plugin: String, enabled: bool) -> Result<(), String> {
+async fn set_plugin_enabled(
+    project: Option<i64>,
+    plugin: String,
+    enabled: bool,
+) -> Result<(), String> {
     blocking(move || {
-        let path = Projects::open_default()?.get(project)?.path;
-        ClaudeCode::from_env().set_enabled(&path, &plugin, enabled)
+        let claude = ClaudeCode::from_env();
+        match project_path(project)? {
+            Some(path) => claude.set_enabled(&path, &plugin, enabled),
+            None => claude.set_enabled_for_user(&plugin, enabled),
+        }
     })
     .await
 }

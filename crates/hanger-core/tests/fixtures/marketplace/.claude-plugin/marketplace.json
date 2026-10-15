@@ -1,0 +1,28 @@
+{
+  "$schema": "https://example.com/marketplace.schema.json",
+  "name": "fixture-market",
+  "owner": { "name": "Fixture Owner", "email": "owner@example.com" },
+  "metadata": { "description": "A marketplace for tests.", "pluginRoot": "./plugins" },
+  "plugins": [
+    { "name": "standard", "source": "./plugins/standard", "description": "Uses the default layout.", "version": "0.0.1", "category": "development" },
+    { "name": "bare", "source": "bare" },
+    {
+      "name": "custom",
+      "source": "./plugins/custom",
+      "author": "Custom Author",
+      "skills": ["./more-skills"],
+      "agents": ["./extra/helper.md"],
+      "commands": "./cmds"
+    },
+    { "name": "root-one", "source": "./", "strict": false, "skills": ["./skills/one"] },
+    { "name": "remote", "source": { "source": "github", "repo": "acme/remote", "sha": "0123456789abcdef0123456789abcdef01234567" } },
+    { "name": "subdir", "source": { "source": "git-subdir", "url": "https://example.com/mono.git", "path": "tools/plugin" } },
+    { "name": "lenient", "source": "./plugins/lenient" },
+    { "name": "conflict", "source": "./plugins/conflict", "strict": false, "agents": ["./agents/b.md"] },
+    { "name": "nonstrict", "source": "./plugins/nonstrict", "strict": false, "commands": "./cmds" },
+    { "name": "escape", "source": "../outside" },
+    { "name": "missing", "source": "./plugins/missing" },
+    { "name": "inline", "source": "./plugins/bare", "commands": { "hello": { "content": "Say hello.", "description": "Greets you." } } },
+    { "description": "An entry without a name or a source." }
+  ]
+}

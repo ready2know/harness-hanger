@@ -17,8 +17,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-8">
-    <h1 class="text-2xl font-semibold">harness-hanger</h1>
+  <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
+    <h1 class="text-2xl font-semibold">Dashboard</h1>
     <Card>
       <CardHeader>
         <CardTitle>Installation</CardTitle>
@@ -35,5 +35,5 @@ onMounted(async () => {
         <p v-else class="text-muted-foreground">Loading…</p>
       </CardContent>
     </Card>
-  </main>
+  </div>
 </template>

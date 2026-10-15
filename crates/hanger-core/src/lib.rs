@@ -4,8 +4,15 @@
 //! (`apps/desktop/src-tauri`) are thin adapters over this crate.
 
 mod error;
+mod frontmatter;
+mod git;
+pub mod harness;
 mod info;
+pub mod marketplace;
 pub mod paths;
+mod process;
+pub mod projects;
+mod store;
 
 pub use error::{Error, Result};
 pub use info::AppInfo;

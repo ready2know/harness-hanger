@@ -1,11 +1,12 @@
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
-use hanger_core::harness::claude_code::UserPlugins;
+use hanger_core::harness::claude_code::{ClaudeCode, Scope, ScopeState, UserPlugins};
 use hanger_core::harness::{Discovery, ImportItem, PluginStatus};
 use hanger_core::marketplace::{
     Catalog, CatalogPlugins, Component, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
     PluginSource,
 };
+use hanger_core::projects::Projects;
 use hanger_core::{AppInfo, paths};
 use serde::Serialize;
 
@@ -28,6 +29,9 @@ enum Command {
     /// Browse plugin marketplaces in harness-hanger's own catalog. Claude Code does not see them.
     #[command(subcommand)]
     Marketplace(MarketplaceCommand),
+    /// Manage project folders, and the Claude Code plugins that apply in each.
+    #[command(subcommand)]
+    Project(ProjectCommand),
     /// Import marketplaces, with their plugins, and standalone skills from a harness, such as
     /// Claude Code. With nothing named to import, lists what can be imported.
     Import {
@@ -41,6 +45,52 @@ enum Command {
         /// Import everything that can be imported and is not in the catalog yet.
         #[arg(long, conflicts_with_all = ["marketplaces", "standalone"])]
         all: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectCommand {
+    /// List the project folders.
+    Ls,
+    /// Add a project folder.
+    Add {
+        /// The folder, such as `~/src/my-app`.
+        path: String,
+    },
+    /// Remove a project from the list. The folder is not touched.
+    Rm {
+        /// The ID that `project ls` shows.
+        id: i64,
+    },
+    /// Show the plugins and standalone components that apply in a project, or globally.
+    Show {
+        /// The ID that `project ls` shows. Leave it out for the global setup.
+        id: Option<i64>,
+    },
+    /// Switch a plugin on in a project.
+    Enable {
+        id: i64,
+        /// `plugin@marketplace`.
+        plugin: String,
+    },
+    /// Switch a plugin off in a project. A plugin installed for the user is switched off only for
+    /// you, in this project.
+    Disable {
+        id: i64,
+        /// `plugin@marketplace`.
+        plugin: String,
+    },
+    /// Install a plugin from a catalog marketplace into a project, for everyone who works on it.
+    Install {
+        id: i64,
+        /// `plugin@marketplace`, where the marketplace is one in the catalog.
+        plugin: String,
+    },
+    /// Uninstall a plugin that is installed in a project.
+    Uninstall {
+        id: i64,
+        /// `plugin@marketplace`.
+        plugin: String,
     },
 }
 
@@ -73,12 +123,151 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Info => info(cli.json),
         Command::Marketplace(command) => marketplace(command, cli.json),
+        Command::Project(command) => project(command, cli.json),
         Command::Import {
             harness,
             marketplaces,
             standalone,
             all,
         } => import(harness, marketplaces, standalone, all, cli.json),
+    }
+}
+
+fn project(command: ProjectCommand, json: bool) -> Result<()> {
+    let projects = Projects::open_default()?;
+    let claude = ClaudeCode::from_env();
+    let done = |message: String| -> Result<()> {
+        if json {
+            print_json(&serde_json::json!({ "done": message }))
+        } else {
+            println!("{message}");
+            Ok(())
+        }
+    };
+    match command {
+        ProjectCommand::Ls => {
+            let list = projects.list()?;
+            if json {
+                return print_json(&list);
+            }
+            if list.is_empty() {
+                println!("No projects. Add one with `harness-hanger project add <path>`.");
+            }
+            for project in &list {
+                let error = project
+                    .error
+                    .as_deref()
+                    .map(|error| format!("  ({error})"))
+                    .unwrap_or_default();
+                println!(
+                    "{:>4}  {}  {}{error}",
+                    project.id,
+                    project.name,
+                    project.path.display()
+                );
+            }
+            Ok(())
+        }
+        ProjectCommand::Add { path } => {
+            let project = projects.add(&path)?;
+            if json {
+                return print_json(&project);
+            }
+            println!("Added {} (ID {})", project.name, project.id);
+            Ok(())
+        }
+        ProjectCommand::Rm { id } => {
+            projects.remove(id)?;
+            done(format!("Removed project {id}"))
+        }
+        ProjectCommand::Show { id } => {
+            let path = id.map(|id| projects.get(id)).transpose()?.map(|p| p.path);
+            let state = claude.scope_state(path.as_deref())?;
+            if json {
+                return print_json(&state);
+            }
+            print_scope(&state);
+            Ok(())
+        }
+        ProjectCommand::Enable { id, plugin } => {
+            let path = projects.get(id)?.path;
+            claude.set_enabled(&path, &plugin, true)?;
+            done(format!("Switched {plugin} on in {}", path.display()))
+        }
+        ProjectCommand::Disable { id, plugin } => {
+            let path = projects.get(id)?.path;
+            claude.set_enabled(&path, &plugin, false)?;
+            done(format!("Switched {plugin} off in {}", path.display()))
+        }
+        ProjectCommand::Install { id, plugin } => {
+            let path = projects.get(id)?.path;
+            let (name, marketplace) = plugin
+                .split_once('@')
+                .ok_or_else(|| anyhow!("expected plugin@marketplace, got {plugin}"))?;
+            let named: Vec<_> = Catalog::open_default()?
+                .list()?
+                .into_iter()
+                .filter(|summary| summary.name.as_deref() == Some(marketplace))
+                .collect();
+            let [summary] = named.as_slice() else {
+                bail!(
+                    "expected one marketplace named {marketplace} in the catalog, found {}",
+                    named.len()
+                );
+            };
+            let scope = claude.install_in_project(&path, name, marketplace, &summary.source)?;
+            let audience = match scope {
+                Scope::Local => "only for you",
+                _ => "for everyone who works on it",
+            };
+            done(format!(
+                "Installed {plugin} in {}, {audience}",
+                path.display()
+            ))
+        }
+        ProjectCommand::Uninstall { id, plugin } => {
+            let path = projects.get(id)?.path;
+            claude.uninstall_from_project(&path, &plugin)?;
+            done(format!("Uninstalled {plugin} from {}", path.display()))
+        }
+    }
+}
+
+fn print_scope(state: &ScopeState) {
+    let installed_for = |scope: Scope| match scope {
+        Scope::User => "the user",
+        Scope::Project => "the project",
+        Scope::Local => "you, in this project",
+    };
+    let settings = |scope: Scope| match scope {
+        Scope::User => "user settings",
+        Scope::Project => "project settings",
+        Scope::Local => "your own project settings",
+    };
+    match &state.project {
+        Some(project) => println!("Project {}", project.display()),
+        None => println!("Global"),
+    }
+    if state.plugins.is_empty() {
+        println!("No plugins.");
+    }
+    for plugin in &state.plugins {
+        let switch = if plugin.enabled { "on " } else { "off" };
+        let decided = plugin
+            .decided_by
+            .map(|scope| format!(", set by {}", settings(scope)))
+            .unwrap_or_default();
+        println!(
+            "  {switch}  {}  installed for {}{decided}",
+            plugin.id,
+            installed_for(plugin.installed_in)
+        );
+    }
+    if let Some(standalone) = &state.standalone {
+        println!("Standalone:");
+        print_components("skills", &standalone.skills);
+        print_components("agents", &standalone.agents);
+        print_components("commands", &standalone.commands);
     }
 }
 

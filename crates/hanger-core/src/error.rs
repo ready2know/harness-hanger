@@ -47,6 +47,20 @@ pub enum Error {
 
     #[error("{item} cannot be imported: {reason}")]
     NotImportable { item: String, reason: String },
+
+    #[error("{0}: expected the path of a folder")]
+    InvalidProjectPath(String),
+
+    #[error("no project with ID {0}")]
+    ProjectNotFound(i64),
+
+    #[error(
+        "cannot find the claude command; install Claude Code, or add the folder that holds it to PATH"
+    )]
+    ClaudeMissing,
+
+    #[error("Claude Code: {0}")]
+    Harness(String),
 }
 
 impl Error {

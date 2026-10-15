@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import {
   BotIcon,
+  FolderIcon,
+  GlobeIcon,
   LayoutDashboardIcon,
   PuzzleIcon,
   SettingsIcon,
   SparklesIcon,
   StoreIcon,
 } from '@lucide/vue'
+import { storeToRefs } from 'pinia'
+import { computed, onMounted } from 'vue'
 
 import AppSidebarNav, { type NavItem } from '@/components/AppSidebarNav.vue'
 import {
@@ -18,15 +22,33 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { projectLabels } from '@/lib/format'
+import { useProjectsStore } from '@/stores/projects'
 
-const mainItems: NavItem[] = [
-  { to: '/', title: 'Dashboard', icon: LayoutDashboardIcon },
+const dashboardItems: NavItem[] = [{ to: '/', title: 'Dashboard', icon: LayoutDashboardIcon }]
+const catalogItems: NavItem[] = [
   { to: '/marketplace', title: 'Marketplace', icon: StoreIcon },
   { to: '/skills', title: 'Skills', icon: SparklesIcon },
   { to: '/agents', title: 'Agents', icon: BotIcon },
   { to: '/plugins', title: 'Plugins', icon: PuzzleIcon },
 ]
 const footerItems: NavItem[] = [{ to: '/settings', title: 'Settings', icon: SettingsIcon }]
+
+const projectsStore = useProjectsStore()
+const { projects } = storeToRefs(projectsStore)
+onMounted(projectsStore.load)
+
+const scopeItems = computed<NavItem[]>(() => {
+  const labels = projectLabels(projects.value ?? [])
+  return [
+    { to: '/global', title: 'Global', icon: GlobeIcon },
+    ...(projects.value ?? []).map((project) => ({
+      to: `/projects/${project.id}`,
+      title: labels.get(project.id) ?? project.name,
+      icon: FolderIcon,
+    })),
+  ]
+})
 </script>
 
 <template>
@@ -44,7 +66,15 @@ const footerItems: NavItem[] = [{ to: '/settings', title: 'Settings', icon: Sett
 
     <SidebarContent>
       <SidebarGroup>
-        <AppSidebarNav :items="mainItems" />
+        <AppSidebarNav :items="dashboardItems" />
+      </SidebarGroup>
+      <SidebarSeparator />
+      <SidebarGroup>
+        <AppSidebarNav :items="catalogItems" />
+      </SidebarGroup>
+      <SidebarSeparator />
+      <SidebarGroup aria-label="Global and projects">
+        <AppSidebarNav :items="scopeItems" />
       </SidebarGroup>
     </SidebarContent>
 

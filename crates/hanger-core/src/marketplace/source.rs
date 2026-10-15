@@ -1,9 +1,9 @@
 use std::fmt;
-use std::path::{self, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::{Error, Result};
+use crate::{Error, Result, paths};
 
 /// Where a marketplace in the catalog comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35,9 +35,9 @@ impl MarketplaceSource {
             return github(rest).ok_or_else(invalid);
         }
         if looks_like_path(input) {
-            return Ok(Self::Local {
-                path: absolute(input)?,
-            });
+            return paths::expand(input)
+                .map(|path| Self::Local { path })
+                .ok_or_else(invalid);
         }
         github(&lower).ok_or_else(invalid)
     }
@@ -124,18 +124,6 @@ fn github(path: &str) -> Option<MarketplaceSource> {
 fn looks_like_path(input: &str) -> bool {
     let path = Path::new(input);
     path.is_absolute() || path.has_root() || input.starts_with('~') || input.starts_with('.')
-}
-
-fn absolute(input: &str) -> Result<PathBuf> {
-    let expanded = match input.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
-            let home =
-                std::env::home_dir().ok_or_else(|| Error::InvalidSource(input.to_owned()))?;
-            home.join(rest.trim_start_matches(['/', '\\']))
-        }
-        _ => PathBuf::from(input),
-    };
-    path::absolute(&expanded).map_err(|source| Error::io(expanded, source))
 }
 
 #[cfg(test)]

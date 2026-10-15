@@ -11,14 +11,22 @@ const FILE_NAME: &str = "harness-hanger.db";
 
 /// Schema changes in order. `PRAGMA user_version` counts how many have been applied, so only
 /// append to this list.
-const MIGRATIONS: &[&str] = &["CREATE TABLE marketplace (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE marketplace (
         -- AUTOINCREMENT: a removed marketplace's ID is never given to another one.
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         kind TEXT NOT NULL,
         location TEXT NOT NULL,
         added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
         UNIQUE (kind, location)
-    )"];
+    )",
+    "CREATE TABLE project (
+        -- AUTOINCREMENT: a removed project's ID is never given to another one.
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    )",
+];
 
 /// Opens the database in `data_dir`, creating it and applying pending migrations as needed.
 pub(crate) fn open(data_dir: &Path) -> Result<Connection> {

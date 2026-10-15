@@ -4,8 +4,9 @@ import CatalogComponentsView from '@/views/CatalogComponentsView.vue'
 import DashboardView from '@/views/DashboardView.vue'
 import MarketplacePreviewView from '@/views/MarketplacePreviewView.vue'
 import MarketplaceView from '@/views/MarketplaceView.vue'
-import PlaceholderView from '@/views/PlaceholderView.vue'
 import PluginsView from '@/views/PluginsView.vue'
+import ScopeView from '@/views/ScopeView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', name: 'dashboard', component: DashboardView },
@@ -19,12 +20,14 @@ export const routes: RouteRecordRaw[] = [
   { path: '/skills', name: 'skills', component: CatalogComponentsView, props: { kind: 'skills' } },
   { path: '/agents', name: 'agents', component: CatalogComponentsView, props: { kind: 'agents' } },
   { path: '/plugins', name: 'plugins', component: PluginsView },
+  { path: '/global', name: 'global', component: ScopeView, props: { projectId: null } },
   {
-    path: '/settings',
-    name: 'settings',
-    component: PlaceholderView,
-    props: { title: 'Settings' },
+    path: '/projects/:id(\\d+)',
+    name: 'project',
+    component: ScopeView,
+    props: (route) => ({ projectId: Number(route.params.id) }),
   },
+  { path: '/settings', name: 'settings', component: SettingsView },
 ]
 
 // Hash history: the desktop app is served from a custom protocol with no server-side fallback.

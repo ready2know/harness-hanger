@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { count, formatSource, relativePath } from '../format'
+import { count, formatSource, projectLabels, relativePath } from '../format'
 
 describe('format', () => {
   it('counts with a singular or plural noun', () => {
@@ -22,5 +22,23 @@ describe('format', () => {
     expect(relativePath('C:\\m\\plugins\\a', 'C:\\m')).toBe('plugins\\a')
     expect(relativePath('/market/x', '/m')).toBe('/market/x')
     expect(relativePath('/other/x', '/m')).toBe('/other/x')
+  })
+
+  it('tells projects with the same name apart by their parent folder', () => {
+    const project = (id: number, path: string) => ({
+      id,
+      path,
+      name: path.split('/').pop()!,
+      addedAt: '',
+      error: null,
+    })
+
+    const labels = projectLabels([
+      project(1, '/dev/hanger/master'),
+      project(2, '/dev/zen/master'),
+      project(3, '/dev/app'),
+    ])
+
+    expect([...labels.values()]).toEqual(['hanger/master', 'zen/master', 'app'])
   })
 })

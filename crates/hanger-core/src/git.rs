@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::{Error, Result};
+use crate::{Error, Result, process};
 
 /// Clones the default branch of `url` into `dest`, without history. `url` can also be a local
 /// repository, such as a copy that a harness keeps.
@@ -75,7 +75,7 @@ fn describe_failure(stderr: &str) -> String {
 }
 
 fn git() -> Command {
-    let mut command = Command::new("git");
+    let mut command = process::background("git");
     // Fail instead of asking for credentials, which the desktop app has nowhere to show.
     // Saved credentials still work. An empty GIT_ASKPASS also stops git from trying
     // `core.askPass` and SSH_ASKPASS.
@@ -86,13 +86,6 @@ fn git() -> Command {
         .env("GCM_INTERACTIVE", "never");
     // English messages, which `describe_failure` recognizes.
     command.env("LC_ALL", "C");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // Keeps a console window from flashing up when the desktop app runs git.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     command
 }
 

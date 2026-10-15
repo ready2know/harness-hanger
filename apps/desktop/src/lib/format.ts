@@ -1,4 +1,10 @@
-import type { MarketplaceSource, MarketplaceSummary, PluginPreview, PluginStatus } from '@/lib/api'
+import type {
+  MarketplaceSource,
+  MarketplaceSummary,
+  PluginPreview,
+  PluginStatus,
+  Project,
+} from '@/lib/api'
 
 /** `1 skill`, `3 skills`. */
 export function count(n: number, noun: string): string {
@@ -43,4 +49,18 @@ export function relativePath(path: string, root: string): string {
   const prefix = root.replace(/[\\/]+$/, '')
   const rest = path.slice(prefix.length)
   return path.startsWith(prefix) && /^[\\/]/.test(rest) ? rest.slice(1) : path
+}
+
+/** Each project's name, with its parent folder when another project has the same name. */
+export function projectLabels(projects: Project[]): Map<number, string> {
+  const seen = new Map<string, number>()
+  for (const project of projects) seen.set(project.name, (seen.get(project.name) ?? 0) + 1)
+  return new Map(
+    projects.map((project) => {
+      if (seen.get(project.name)! < 2) return [project.id, project.name]
+      const parts = project.path.split(/[\\/]/).filter(Boolean)
+      const parent = parts[parts.length - 2]
+      return [project.id, parent ? `${parent}/${project.name}` : project.path]
+    }),
+  )
 }

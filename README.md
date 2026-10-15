@@ -50,6 +50,7 @@ pnpm dev                              # run the desktop app
 cargo run -p hanger-cli -- info       # run the CLI
 cargo run -p hanger-cli -- marketplace add owner/repo   # add a marketplace to the catalog
 cargo run -p hanger-cli -- import claude-code --all      # import what Claude Code already has
+cargo run -p hanger-cli -- project add ~/src/my-app        # add a project folder
 ```
 
 The CLI and the desktop app keep their data in one directory: `harness-hanger` in the platform's

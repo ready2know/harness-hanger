@@ -16,13 +16,26 @@ use super::{Discovery, FoundMarketplace, FoundStandalone, HarnessAdapter, Plugin
 use crate::marketplace::MarketplaceSource;
 use crate::{Error, Result, paths};
 
+mod cli;
+mod scope;
+
+pub use cli::PluginChange;
+pub use scope::{Scope, ScopeState, ScopedPlugin};
+
 const INSTALLED_PLUGINS: &str = "plugins/installed_plugins.json";
 const KNOWN_MARKETPLACES: &str = "plugins/known_marketplaces.json";
 const USER_SETTINGS: &str = "settings.json";
 
-/// Reads what Claude Code has from its config directory.
+/// Reads what Claude Code has from its config directory, and changes its plugins through its
+/// `claude` command.
 pub struct ClaudeCode {
     config_dir: Option<PathBuf>,
+    /// The `claude` command to run. `None` looks for it.
+    cli: Option<PathBuf>,
+    /// Whether `claude` is told about `config_dir`. Only for a directory given with
+    /// [`ClaudeCode::new`]: Claude Code also moves its global `.claude.json` into a directory set
+    /// this way, so the default must reach it only through the environment it inherits.
+    pass_config_dir: bool,
 }
 
 impl ClaudeCode {
@@ -31,6 +44,8 @@ impl ClaudeCode {
     pub fn from_env() -> Self {
         Self {
             config_dir: paths::claude_config_dir().ok(),
+            cli: None,
+            pass_config_dir: false,
         }
     }
 
@@ -39,7 +54,16 @@ impl ClaudeCode {
     pub fn new(config_dir: impl Into<PathBuf>) -> Self {
         Self {
             config_dir: Some(config_dir.into()),
+            cli: None,
+            pass_config_dir: true,
         }
+    }
+
+    /// Runs `cli` instead of the `claude` command found on this machine, such as a fake in tests.
+    #[must_use]
+    pub fn with_cli(mut self, cli: impl Into<PathBuf>) -> Self {
+        self.cli = Some(cli.into());
+        self
     }
 
     fn existing_config_dir(&self) -> Option<&Path> {
@@ -273,9 +297,18 @@ fn has_user_install(installs: &Value) -> bool {
     }
 }
 
-/// IDs that `enabledPlugins` sets to `true`. Only this key of the settings is read: the rest can
-/// hold secrets, such as tokens in `env`.
+/// IDs that `enabledPlugins` sets to `true`.
 fn enabled_plugins(settings: &Value) -> HashSet<String> {
+    enabled_plugin_settings(settings)
+        .into_iter()
+        .filter(|(_, enabled)| *enabled)
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// `enabledPlugins`: the ID of each plugin that the settings switch on or off. Only this key of
+/// the settings is read: the rest can hold secrets, such as tokens in `env`.
+fn enabled_plugin_settings(settings: &Value) -> BTreeMap<String, bool> {
     #[derive(Deserialize)]
     struct Settings {
         #[serde(rename = "enabledPlugins", default)]
@@ -286,8 +319,7 @@ fn enabled_plugins(settings: &Value) -> HashSet<String> {
             settings
                 .enabled_plugins
                 .into_iter()
-                .filter(|(_, enabled)| enabled == &Value::Bool(true))
-                .map(|(id, _)| id)
+                .filter_map(|(id, enabled)| enabled.as_bool().map(|enabled| (id, enabled)))
                 .collect()
         })
         .unwrap_or_default()

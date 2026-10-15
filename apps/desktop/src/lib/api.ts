@@ -159,6 +159,81 @@ export function importFromHarness(harness: string, item: ImportItem): Promise<Ma
   return invoke<MarketplaceSummary>('import_from_harness', { harness, item })
 }
 
+/** Mirrors `hanger_core::projects::Project`. */
+export interface Project {
+  id: number
+  /** The folder's name. */
+  name: string
+  path: string
+  addedAt: string
+  /** Why the folder cannot be used, for example because it was moved. */
+  error: string | null
+}
+
+export function listProjects(): Promise<Project[]> {
+  return invoke<Project[]>('list_projects')
+}
+
+/** `path` is a folder path, which can start with `~`. */
+export function addProject(path: string): Promise<Project> {
+  return invoke<Project>('add_project', { path })
+}
+
+export function removeProject(id: number): Promise<void> {
+  return invoke<void>('remove_project', { id })
+}
+
+/**
+ * Mirrors `hanger_core::harness::claude_code::Scope`: where a plugin is installed, and which
+ * settings switch it. `user` applies everywhere, `project` is shared through the project's
+ * `.claude/settings.json`, and `local` is the person's own `.claude/settings.local.json`.
+ */
+export type Scope = 'user' | 'project' | 'local'
+
+/** Mirrors `hanger_core::harness::claude_code::ScopedPlugin`. */
+export interface ScopedPlugin {
+  /** `plugin@marketplace`. */
+  id: string
+  name: string
+  marketplace: string
+  installedIn: Scope
+  /** Whether Claude Code loads it here. */
+  enabled: boolean
+  /** The settings that decided `enabled`. `null` when none mention it, which leaves it off. */
+  decidedBy: Scope | null
+  version: string | null
+  description: string | null
+}
+
+/** Mirrors `hanger_core::harness::claude_code::ScopeState`. */
+export interface ScopeState {
+  /** The project's folder, or `null` for the global setup. */
+  project: string | null
+  plugins: ScopedPlugin[]
+  standalone: PluginPreview | null
+  warnings: ScanWarning[]
+}
+
+/** What applies in a project, or globally when `project` is `null`. */
+export function getScopeState(project: number | null): Promise<ScopeState> {
+  return invoke<ScopeState>('scope_state', { project })
+}
+
+/** Switches `plugin` (`plugin@marketplace`) on or off in a project, through Claude Code. */
+export function setPluginEnabled(project: number, plugin: string, enabled: boolean): Promise<void> {
+  return invoke<void>('set_plugin_enabled', { project, plugin, enabled })
+}
+
+/** Installs `plugin` from the catalog marketplace `marketplace` into a project, for everyone. */
+export function installPlugin(project: number, marketplace: number, plugin: string): Promise<void> {
+  return invoke<void>('install_plugin', { project, marketplace, plugin })
+}
+
+/** Uninstalls a plugin that is installed in a project. */
+export function uninstallPlugin(project: number, plugin: string): Promise<void> {
+  return invoke<void>('uninstall_plugin', { project, plugin })
+}
+
 export function removeMarketplace(id: number): Promise<void> {
   return invoke<void>('remove_marketplace', { id })
 }

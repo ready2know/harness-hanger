@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { getAppInfo, getMarketplaceDetails, listCatalogPlugins, listMarketplaces } from '@/lib/api'
+import {
+  getAppInfo,
+  getMarketplaceDetails,
+  listCatalogPlugins,
+  listMarketplaces,
+  listProjects,
+} from '@/lib/api'
 import { routes } from '@/router'
 import App from '../App.vue'
 
@@ -10,6 +17,7 @@ vi.mock('@/lib/api', () => ({
   getAppInfo: vi.fn<typeof getAppInfo>(),
   listMarketplaces: vi.fn<typeof listMarketplaces>(),
   listCatalogPlugins: vi.fn<typeof listCatalogPlugins>(),
+  listProjects: vi.fn<typeof listProjects>(),
   // Never settles: these tests only look at the layout around the page.
   getMarketplaceDetails: vi.fn<typeof getMarketplaceDetails>(() => new Promise(() => {})),
 }))
@@ -21,13 +29,19 @@ beforeEach(() => {
   vi.mocked(getAppInfo).mockResolvedValue({ version: '1.2.3', claudeConfigDir: null })
   vi.mocked(listMarketplaces).mockResolvedValue([])
   vi.mocked(listCatalogPlugins).mockResolvedValue({ plugins: [], unreadable: [] })
+  vi.mocked(listProjects).mockResolvedValue([
+    { id: 4, name: 'my-app', path: '/src/my-app', addedAt: '2026-10-15T12:00:00Z', error: null },
+  ])
 })
 
 async function mountAt(path: string) {
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push(path)
   // Attached, so that events reach document listeners and portalled menus and dialogs.
-  const wrapper = mount(App, { global: { plugins: [router] }, attachTo: document.body })
+  const wrapper = mount(App, {
+    global: { plugins: [router, createPinia()] },
+    attachTo: document.body,
+  })
   await flushPromises()
   return wrapper
 }
@@ -47,6 +61,16 @@ describe('App sidebar', () => {
     }
     expect(content).not.toContain('Settings')
     expect(wrapper.get('[data-sidebar="footer"]').text()).toContain('Settings')
+  })
+
+  it('separates Dashboard, the catalog, and Global with the projects', async () => {
+    const wrapper = await mountAt('/')
+
+    const content = wrapper.get('[data-sidebar="content"]')
+    const groups = content.findAll('[data-sidebar="group"]').map((group) => group.text())
+    expect(groups).toEqual(['Dashboard', 'MarketplaceSkillsAgentsPlugins', 'Globalmy-app'])
+    expect(content.findAll('[data-sidebar="separator"]')).toHaveLength(2)
+    expect(content.get('a[href="/projects/4"]').text()).toBe('my-app')
   })
 
   it('marks the current section as active', async () => {

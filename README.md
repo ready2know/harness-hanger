@@ -48,7 +48,7 @@ docs/
 pnpm install                          # JS dependencies and git hooks
 pnpm dev                              # run the desktop app
 cargo run -p hanger-cli -- info       # run the CLI
-cargo run -p hanger-cli -- marketplace add owner/repo   # add a marketplace to the catalog
+cargo run -p hanger-cli -- marketplace add owner/repo   # add marketplaces to the catalog, one or more
 cargo run -p hanger-cli -- import claude-code --all      # import what Claude Code already has
 cargo run -p hanger-cli -- project add ~/src/my-app        # add a project folder
 ```

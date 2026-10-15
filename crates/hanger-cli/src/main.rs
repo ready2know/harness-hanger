@@ -96,10 +96,13 @@ enum ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 enum MarketplaceCommand {
-    /// Add a marketplace from GitHub (a URL or owner/repo) or from a local directory.
+    /// Add marketplaces from GitHub (a URL or owner/repo) or from local directories.
+    ///
+    /// With several sources, each is added in turn, and `--json` prints one result per source.
     Add {
         /// For example `https://github.com/owner/repo`, `owner/repo`, or `~/src/my-marketplace`.
-        source: String,
+        #[arg(required = true)]
+        sources: Vec<String>,
     },
     /// List the marketplaces in the catalog.
     Ls,
@@ -439,21 +442,38 @@ fn info(json: bool) -> Result<()> {
 fn marketplace(command: MarketplaceCommand, json: bool) -> Result<()> {
     let catalog = Catalog::open_default()?;
     match command {
-        MarketplaceCommand::Add { source } => {
-            let source = MarketplaceSource::parse(&source)?;
-            if !json && matches!(source, MarketplaceSource::GitHub { .. }) {
-                eprintln!("Cloning {source}…");
+        MarketplaceCommand::Add { sources } => {
+            if let [source] = sources.as_slice() {
+                let added = add_marketplace(&catalog, source, json)?;
+                if json {
+                    return print_json(&added);
+                }
+                return Ok(());
             }
-            let added = catalog.add(&source)?;
+            let mut results = Vec::new();
+            let mut failed = 0;
+            for source in &sources {
+                match add_marketplace(&catalog, source, json) {
+                    Ok(added) => {
+                        results.push(serde_json::json!({ "source": source, "added": added }));
+                    }
+                    Err(error) => {
+                        failed += 1;
+                        if !json {
+                            println!("Not added: {source}: {error}");
+                        }
+                        results.push(
+                            serde_json::json!({ "source": source, "error": error.to_string() }),
+                        );
+                    }
+                }
+            }
             if json {
-                return print_json(&added);
+                print_json(&results)?;
             }
-            println!(
-                "Added {} (ID {}): {} plugins",
-                added.name.as_deref().unwrap_or("?"),
-                added.id,
-                added.plugin_count
-            );
+            if failed > 0 {
+                bail!("{failed} of {} marketplaces were not added", sources.len());
+            }
         }
         MarketplaceCommand::Ls => {
             let marketplaces = catalog.list()?;
@@ -486,6 +506,24 @@ fn marketplace(command: MarketplaceCommand, json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Adds one marketplace, saying what happens unless `json` asks for quiet.
+fn add_marketplace(catalog: &Catalog, source: &str, json: bool) -> Result<MarketplaceSummary> {
+    let source = MarketplaceSource::parse(source)?;
+    if !json && matches!(source, MarketplaceSource::GitHub { .. }) {
+        eprintln!("Cloning {source}…");
+    }
+    let added = catalog.add(&source)?;
+    if !json {
+        println!(
+            "Added {} (ID {}): {} plugins",
+            added.name.as_deref().unwrap_or("?"),
+            added.id,
+            added.plugin_count
+        );
+    }
+    Ok(added)
 }
 
 fn print_json(value: &impl Serialize) -> Result<()> {

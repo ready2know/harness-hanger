@@ -126,7 +126,7 @@ function openPreview(marketplace: MarketplaceSummary) {
       </li>
     </ul>
 
-    <AddMarketplaceDialog v-model:open="addOpen" @added="openPreview" />
+    <AddMarketplaceDialog v-model:open="addOpen" @added="openPreview" @added-several="load" />
     <ImportDialog v-model:open="importOpen" @imported="load" />
   </div>
 </template>

@@ -76,15 +76,16 @@ function dialog() {
   return document.body.querySelector<HTMLElement>('[data-slot="dialog-content"]')
 }
 
-/** The input reports its value to the dialog on the next tick. */
+/** The field reports its value to the dialog on the next tick. */
 async function setInput(value: string) {
-  const input = dialog()!.querySelector('input')!
-  input.value = value
-  input.dispatchEvent(new Event('input'))
+  const field = dialog()!.querySelector('textarea')!
+  field.value = value
+  field.dispatchEvent(new Event('input'))
   await flushPromises()
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.mocked(listMarketplaces).mockResolvedValue([official, moved])
 })
 
@@ -135,7 +136,7 @@ describe('MarketplaceView', () => {
     browse.click()
     await flushPromises()
 
-    expect(dialog()!.querySelector('input')!.value).toBe('/src/my-marketplace')
+    expect(dialog()!.querySelector('textarea')!.value).toBe('/src/my-marketplace')
   })
 
   it('shows why a marketplace could not be added', async () => {
@@ -198,5 +199,24 @@ describe('MarketplaceView', () => {
 
     expect(dialog()!.textContent).toContain('Import from a harness')
     expect(getImportCandidates).toHaveBeenCalled()
+  })
+
+  it('adds several marketplaces and lists them', async () => {
+    vi.mocked(listMarketplaces).mockResolvedValueOnce([])
+    vi.mocked(addMarketplace).mockResolvedValue(official)
+    const { wrapper, router } = await mountView()
+
+    await clickButton(wrapper, 'Add marketplace')
+    await setInput('anthropics/claude-plugins-official\n/src/moved')
+    dialog()!.querySelector('form')!.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(vi.mocked(addMarketplace).mock.calls).toEqual([
+      ['anthropics/claude-plugins-official'],
+      ['/src/moved'],
+    ])
+    expect(router.currentRoute.value.fullPath).toBe('/marketplace')
+    expect(dialog()!.textContent).toContain('2 added')
+    expect(wrapper.findAll('li')).toHaveLength(2)
   })
 })

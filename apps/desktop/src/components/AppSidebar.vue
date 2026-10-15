@@ -3,7 +3,9 @@ import {
   BotIcon,
   FolderIcon,
   GlobeIcon,
+  LayersIcon,
   LayoutDashboardIcon,
+  PlusIcon,
   PuzzleIcon,
   SettingsIcon,
   SparklesIcon,
@@ -13,6 +15,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted } from 'vue'
 
 import AppSidebarNav, { type NavItem } from '@/components/AppSidebarNav.vue'
+import SidebarSection from '@/components/SidebarSection.vue'
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +34,10 @@ const catalogItems: NavItem[] = [
   { to: '/skills', title: 'Skills', icon: SparklesIcon },
   { to: '/agents', title: 'Agents', icon: BotIcon },
   { to: '/plugins', title: 'Plugins', icon: PuzzleIcon },
+]
+const collectionItems: NavItem[] = [
+  { to: '/collections', title: 'All collections', icon: LayersIcon },
+  { to: '/collections/new', title: 'Add collection', icon: PlusIcon },
 ]
 const footerItems: NavItem[] = [{ to: '/settings', title: 'Settings', icon: SettingsIcon }]
 
@@ -73,9 +80,13 @@ const scopeItems = computed<NavItem[]>(() => {
         <AppSidebarNav :items="catalogItems" />
       </SidebarGroup>
       <SidebarSeparator />
-      <SidebarGroup aria-label="Global and projects">
+      <SidebarSection title="Collections" storage-key="sidebar-collections-open">
+        <AppSidebarNav :items="collectionItems" />
+      </SidebarSection>
+      <SidebarSeparator />
+      <SidebarSection title="Projects" storage-key="sidebar-projects-open">
         <AppSidebarNav :items="scopeItems" />
-      </SidebarGroup>
+      </SidebarSection>
     </SidebarContent>
 
     <SidebarSeparator />

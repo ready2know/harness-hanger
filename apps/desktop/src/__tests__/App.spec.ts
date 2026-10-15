@@ -63,13 +63,18 @@ describe('App sidebar', () => {
     expect(wrapper.get('[data-sidebar="footer"]').text()).toContain('Settings')
   })
 
-  it('separates Dashboard, the catalog, and Global with the projects', async () => {
+  it('separates Dashboard, the catalog, collections, and Global with the projects', async () => {
     const wrapper = await mountAt('/')
 
     const content = wrapper.get('[data-sidebar="content"]')
     const groups = content.findAll('[data-sidebar="group"]').map((group) => group.text())
-    expect(groups).toEqual(['Dashboard', 'MarketplaceSkillsAgentsPlugins', 'Globalmy-app'])
-    expect(content.findAll('[data-sidebar="separator"]')).toHaveLength(2)
+    expect(groups).toEqual([
+      'Dashboard',
+      'MarketplaceSkillsAgentsPlugins',
+      'Collections All collectionsAdd collection',
+      'Projects Globalmy-app',
+    ])
+    expect(content.findAll('[data-sidebar="separator"]')).toHaveLength(3)
     expect(content.get('a[href="/projects/4"]').text()).toBe('my-app')
   })
 
@@ -86,6 +91,38 @@ describe('App sidebar', () => {
 
     const active = wrapper.findAll('[data-sidebar="menu-button"][data-active]')
     expect(active.map((button) => button.text())).toEqual(['Marketplace'])
+  })
+
+  it('marks only the most specific section on a page below another', async () => {
+    const wrapper = await mountAt('/collections/new')
+
+    const active = wrapper.findAll('[data-sidebar="menu-button"][data-active]')
+    expect(active.map((button) => button.text())).toEqual(['Add collection'])
+    expect(wrapper.get('h1').text()).toBe('Add collection')
+  })
+
+  it('folds the Projects section away and remembers it', async () => {
+    const wrapper = await mountAt('/')
+    const trigger = wrapper
+      .findAll('button[aria-expanded]')
+      .find((button) => button.text() === 'Projects')!
+    expect(wrapper.find('a[href="/projects/4"]').exists()).toBe(true)
+
+    await trigger.trigger('click')
+    await flushPromises()
+
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('a[href="/projects/4"]').exists()).toBe(false)
+    expect(localStorage.getItem('sidebar-projects-open')).toBe('false')
+  })
+
+  it('shows a folded section while the sidebar shows only icons', async () => {
+    localStorage.setItem('sidebar-projects-open', 'false')
+    localStorage.setItem('sidebar-open', 'false')
+
+    const wrapper = await mountAt('/')
+
+    expect(wrapper.find('a[href="/projects/4"]').exists()).toBe(true)
   })
 
   it('collapses to icons with the toggle button and remembers it', async () => {

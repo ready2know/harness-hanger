@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
+import { computed, type Component } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
@@ -11,13 +11,26 @@ export interface NavItem {
   icon: Component
 }
 
-defineProps<{ items: NavItem[] }>()
+const props = defineProps<{ items: NavItem[] }>()
 
 const route = useRoute()
 
+function covers(to: string): boolean {
+  if (to === '/') return route.path === '/'
+  return route.path === to || route.path.startsWith(`${to}/`)
+}
+
+/** The item with the longest path that covers the page, so that only Add collection is active on its page, not Collections too. */
+const activeTo = computed(
+  () =>
+    props.items
+      .map((item) => item.to)
+      .filter(covers)
+      .sort((a, b) => b.length - a.length)[0],
+)
+
 function isActive(item: NavItem): boolean {
-  if (item.to === '/') return route.path === '/'
-  return route.path === item.to || route.path.startsWith(`${item.to}/`)
+  return item.to === activeTo.value
 }
 </script>
 

@@ -39,6 +39,16 @@ pub enum Error {
     #[error("no marketplace with ID {0} in the catalog")]
     MarketplaceNotFound(i64),
 
+    #[error("{marketplace} has no plugin named {plugin}")]
+    PluginNotFound { marketplace: String, plugin: String },
+
+    #[error("{plugin} has no {kind} named {name}")]
+    ComponentNotFound {
+        plugin: String,
+        kind: &'static str,
+        name: String,
+    },
+
     #[error("harness-hanger cannot import from {0}")]
     UnknownHarness(String),
 

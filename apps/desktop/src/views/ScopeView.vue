@@ -12,6 +12,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 
 import ComponentList from '@/components/ComponentList.vue'
+import PagedList from '@/components/PagedList.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -36,6 +37,7 @@ import {
   type ScopeState,
 } from '@/lib/api'
 import { count, relativePath } from '@/lib/format'
+import { scopePageSize } from '@/lib/pageSizes'
 import { useProjectsStore } from '@/stores/projects'
 
 /** `null` for the global setup. */
@@ -95,15 +97,14 @@ watch(
 )
 
 /** Runs a change through Claude Code, then shows the state that it left. */
-async function change(pluginId: string, run: (projectId: number) => Promise<void>) {
+async function change(pluginId: string, run: () => Promise<void>) {
   const projectId = props.projectId
-  if (projectId === null) return
   const key = `${projectId}/${pluginId}`
   if (busy.value[key]) return
   busy.value[key] = true
   delete rowErrors.value[key]
   try {
-    await run(projectId)
+    await run()
   } catch (e) {
     rowErrors.value[key] = String(e)
   }
@@ -117,19 +118,23 @@ async function change(pluginId: string, run: (projectId: number) => Promise<void
   }
 }
 
+/** Switches a plugin in this project, or for the user on the Global page. */
 function toggle(plugin: ScopedPlugin, enabled: boolean) {
-  return change(plugin.id, (projectId) => setPluginEnabled(projectId, plugin.id, enabled))
+  const projectId = props.projectId
+  return change(plugin.id, () => setPluginEnabled(projectId, plugin.id, enabled))
 }
 
 function uninstall(plugin: ScopedPlugin) {
   confirming.value = undefined
-  return change(plugin.id, (projectId) => uninstallPlugin(projectId, plugin.id))
+  const projectId = props.projectId
+  if (projectId === null) return
+  return change(plugin.id, () => uninstallPlugin(projectId, plugin.id))
 }
 
 function install(entry: CatalogPlugin) {
-  return change(idOf(entry), (projectId) =>
-    installPlugin(projectId, entry.marketplaceId, entry.plugin.name),
-  )
+  const projectId = props.projectId
+  if (projectId === null) return
+  return change(idOf(entry), () => installPlugin(projectId, entry.marketplaceId, entry.plugin.name))
 }
 
 function idOf(entry: CatalogPlugin): string {
@@ -157,7 +162,6 @@ const candidates = computed(() => {
     )
     .sort((a, b) => a.plugin.name.localeCompare(b.plugin.name))
 })
-const shownCandidates = computed(() => candidates.value.slice(0, 50))
 
 const scopeLabels: Record<Scope, string> = {
   user: 'Global',
@@ -203,8 +207,9 @@ const standaloneItems = computed(() => {
         {{ projectId === null ? 'Global' : (project?.name ?? 'Project') }}
       </h1>
       <p v-if="projectId === null" class="text-muted-foreground text-sm">
-        What Claude Code loads for your user, in every project. To change it, use
-        <code>/plugin</code> in Claude Code, or switch a plugin off for one project on its page.
+        What Claude Code loads for your user, in every project. A switch here turns a plugin on or
+        off for your user; a project whose own settings switch it keeps its choice. To switch a
+        plugin for one project only, use that project's page.
       </p>
       <template v-else-if="project">
         <p class="text-muted-foreground truncate font-mono text-xs" :title="project.path">
@@ -231,66 +236,61 @@ const standaloneItems = computed(() => {
         <p v-if="state.plugins.length === 0" class="text-muted-foreground text-sm">
           No plugins are installed {{ projectId === null ? 'for your user' : 'here' }}.
         </p>
-        <ul v-else class="divide-y rounded-xl border">
-          <li
-            v-for="plugin in state.plugins"
-            :key="plugin.id"
-            class="flex items-start gap-3 px-4 py-3"
-          >
-            <div class="flex min-w-0 flex-1 flex-col gap-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium">{{ plugin.name }}</span>
-                <span class="text-muted-foreground text-xs">@{{ plugin.marketplace }}</span>
-                <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
-                <Badge v-if="projectId !== null" variant="outline">
-                  {{ scopeLabels[plugin.installedIn] }}
-                </Badge>
+        <PagedList
+          v-else
+          v-slot="{ items: visible }"
+          :items="state.plugins"
+          :setting="scopePageSize"
+        >
+          <ul class="divide-y rounded-xl border">
+            <li v-for="plugin in visible" :key="plugin.id" class="flex items-start gap-3 px-4 py-3">
+              <div class="flex min-w-0 flex-1 flex-col gap-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium">{{ plugin.name }}</span>
+                  <span class="text-muted-foreground text-xs">@{{ plugin.marketplace }}</span>
+                  <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
+                  <Badge v-if="projectId !== null" variant="outline">
+                    {{ scopeLabels[plugin.installedIn] }}
+                  </Badge>
+                </div>
+                <p v-if="plugin.description" class="text-muted-foreground line-clamp-2 text-sm">
+                  {{ plugin.description }}
+                </p>
+                <p class="text-muted-foreground text-xs">{{ explain(plugin) }}</p>
+                <p v-if="rowErrors[keyOf(plugin.id)]" role="alert" class="text-destructive text-xs">
+                  {{ rowErrors[keyOf(plugin.id)] }}
+                </p>
               </div>
-              <p v-if="plugin.description" class="text-muted-foreground line-clamp-2 text-sm">
-                {{ plugin.description }}
-              </p>
-              <p class="text-muted-foreground text-xs">{{ explain(plugin) }}</p>
-              <p v-if="rowErrors[keyOf(plugin.id)]" role="alert" class="text-destructive text-xs">
-                {{ rowErrors[keyOf(plugin.id)] }}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <LoaderCircleIcon
-                v-if="busy[keyOf(plugin.id)]"
-                class="text-muted-foreground size-4 animate-spin"
-                aria-label="Changing"
-              />
-              <Button
-                v-if="projectId !== null && plugin.installedIn !== 'user'"
-                variant="ghost"
-                size="icon-sm"
-                :aria-label="`Uninstall ${plugin.name}`"
-                :disabled="busy[keyOf(plugin.id)]"
-                @click="confirming = plugin"
-              >
-                <TrashIcon />
-              </Button>
-              <Switch
-                v-if="projectId !== null"
-                :model-value="plugin.enabled"
-                :disabled="busy[keyOf(plugin.id)]"
-                :aria-label="`${plugin.name} on in this project`"
-                @update:model-value="toggle(plugin, $event)"
-              />
-              <Badge
-                v-else
-                :variant="plugin.enabled ? 'secondary' : 'outline'"
-                :class="
-                  plugin.enabled
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
-                    : 'text-muted-foreground'
-                "
-              >
-                {{ plugin.enabled ? 'Enabled' : 'Disabled' }}
-              </Badge>
-            </div>
-          </li>
-        </ul>
+              <div class="flex shrink-0 items-center gap-2">
+                <LoaderCircleIcon
+                  v-if="busy[keyOf(plugin.id)]"
+                  class="text-muted-foreground size-4 animate-spin"
+                  aria-label="Changing"
+                />
+                <Button
+                  v-if="projectId !== null && plugin.installedIn !== 'user'"
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="`Uninstall ${plugin.name}`"
+                  :disabled="busy[keyOf(plugin.id)]"
+                  @click="confirming = plugin"
+                >
+                  <TrashIcon />
+                </Button>
+                <Switch
+                  :model-value="plugin.enabled"
+                  :disabled="busy[keyOf(plugin.id)]"
+                  :aria-label="
+                    projectId === null
+                      ? `${plugin.name} on for your user`
+                      : `${plugin.name} on in this project`
+                  "
+                  @update:model-value="toggle(plugin, $event)"
+                />
+              </div>
+            </li>
+          </ul>
+        </PagedList>
       </section>
 
       <section
@@ -328,10 +328,16 @@ const standaloneItems = computed(() => {
         <p v-else-if="candidates.length === 0" class="text-muted-foreground text-sm">
           {{ installQuery ? 'No plugins match.' : 'Nothing to install: add a marketplace first.' }}
         </p>
-        <template v-else>
+        <PagedList
+          v-else
+          :key="installQuery"
+          v-slot="{ items: visible }"
+          :items="candidates"
+          :setting="scopePageSize"
+        >
           <ul class="divide-y rounded-xl border">
             <li
-              v-for="entry in shownCandidates"
+              v-for="entry in visible"
               :key="`${entry.marketplaceId}/${entry.plugin.name}`"
               class="flex items-start gap-3 px-4 py-3"
             >
@@ -367,13 +373,7 @@ const standaloneItems = computed(() => {
               </Button>
             </li>
           </ul>
-          <p
-            v-if="candidates.length > shownCandidates.length"
-            class="text-muted-foreground text-xs"
-          >
-            And {{ candidates.length - shownCandidates.length }} more. Search to find one.
-          </p>
-        </template>
+        </PagedList>
       </section>
 
       <section class="flex flex-col gap-3" aria-labelledby="standalone-heading">
@@ -388,7 +388,7 @@ const standaloneItems = computed(() => {
             {{ projectId === null ? 'for your user' : 'in this project' }}.
           </p>
         </div>
-        <ComponentList :items="standaloneItems" empty="None." />
+        <ComponentList :items="standaloneItems" empty="None." :page-size="scopePageSize" />
         <details v-if="state.warnings.length" class="rounded-xl border px-4 py-3">
           <summary class="flex cursor-pointer items-center gap-2 text-sm font-medium">
             <TriangleAlertIcon class="size-4 text-amber-500" />

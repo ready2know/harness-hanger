@@ -10,6 +10,7 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import ComponentList from '@/components/ComponentList.vue'
+import PagedList from '@/components/PagedList.vue'
 import SourceIcon from '@/components/SourceIcon.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,8 +24,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { getMarketplaceDetails, removeMarketplace, type MarketplaceDetails } from '@/lib/api'
+import {
+  getMarketplaceDetails,
+  removeMarketplace,
+  type ComponentKind,
+  type MarketplaceDetails,
+} from '@/lib/api'
 import { count, formatLocation, pluginContents, relativePath } from '@/lib/format'
+import { componentRoute, pluginRoute } from '@/lib/routes'
 
 const props = defineProps<{ id: number }>()
 
@@ -74,12 +81,13 @@ const shownPlugins = computed(() =>
   plugins.value.filter((plugin) => matches(plugin.name, plugin.description, plugin.category)),
 )
 
-function componentsOf(kind: 'skills' | 'agents' | 'commands') {
+function componentsOf(kind: ComponentKind, list: 'skills' | 'agents' | 'commands') {
   return plugins.value
     .flatMap((plugin) =>
-      plugin[kind].map((component) => ({
+      plugin[list].map((component) => ({
         component,
         plugin: plugin.source.kind === 'harness' ? 'standalone' : plugin.name,
+        to: componentRoute(kind, props.id, plugin.name, component.name),
       })),
     )
     .filter(({ component }) => matches(component.name, component.description))
@@ -89,9 +97,9 @@ function componentsOf(kind: 'skills' | 'agents' | 'commands') {
     )
 }
 
-const skills = computed(() => componentsOf('skills'))
-const agents = computed(() => componentsOf('agents'))
-const commands = computed(() => componentsOf('commands'))
+const skills = computed(() => componentsOf('skill', 'skills'))
+const agents = computed(() => componentsOf('agent', 'agents'))
+const commands = computed(() => componentsOf('command', 'commands'))
 
 function setRemoveOpen(value: boolean) {
   // Stays open while removing, so that a failure is seen.
@@ -185,40 +193,60 @@ async function remove() {
           <p v-if="shownPlugins.length === 0" class="text-muted-foreground py-6 text-center">
             No plugins match.
           </p>
-          <ul v-else class="divide-y rounded-xl border">
-            <li
-              v-for="(plugin, index) in shownPlugins"
-              :key="`${index}/${plugin.name}`"
-              class="flex flex-col gap-1 px-4 py-3"
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium">{{ plugin.name }}</span>
-                <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
-                <Badge v-if="plugin.category" variant="outline">{{ plugin.category }}</Badge>
-                <Badge
-                  v-if="plugin.source.kind === 'external'"
-                  variant="outline"
-                  :title="plugin.source.location ?? undefined"
-                >
-                  <ExternalLinkIcon />
-                  {{ plugin.source.source }}
-                </Badge>
-              </div>
-              <p v-if="plugin.description" class="text-muted-foreground line-clamp-2">
-                {{ plugin.description }}
-              </p>
-              <p class="text-muted-foreground text-xs">{{ pluginContents(plugin) }}</p>
-            </li>
-          </ul>
+          <PagedList v-else :key="query" v-slot="{ items: visible }" :items="shownPlugins">
+            <ul class="divide-y rounded-xl border">
+              <li
+                v-for="(plugin, index) in visible"
+                :key="`${index}/${plugin.name}`"
+                class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <!-- The link covers the whole row. -->
+                  <RouterLink
+                    :to="pluginRoute(id, plugin.name)"
+                    class="font-medium after:absolute after:inset-0"
+                  >
+                    {{ plugin.name }}
+                  </RouterLink>
+                  <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
+                  <Badge v-if="plugin.category" variant="outline">{{ plugin.category }}</Badge>
+                  <Badge
+                    v-if="plugin.source.kind === 'external'"
+                    variant="outline"
+                    :title="plugin.source.location ?? undefined"
+                  >
+                    <ExternalLinkIcon />
+                    {{ plugin.source.source }}
+                  </Badge>
+                </div>
+                <p v-if="plugin.description" class="text-muted-foreground line-clamp-2">
+                  {{ plugin.description }}
+                </p>
+                <p class="text-muted-foreground text-xs">{{ pluginContents(plugin) }}</p>
+              </li>
+            </ul>
+          </PagedList>
         </TabsContent>
         <TabsContent value="skills">
-          <ComponentList :items="skills" :empty="query ? 'No skills match.' : 'No skills.'" />
+          <ComponentList
+            :key="query"
+            :items="skills"
+            :empty="query ? 'No skills match.' : 'No skills.'"
+          />
         </TabsContent>
         <TabsContent value="agents">
-          <ComponentList :items="agents" :empty="query ? 'No agents match.' : 'No agents.'" />
+          <ComponentList
+            :key="query"
+            :items="agents"
+            :empty="query ? 'No agents match.' : 'No agents.'"
+          />
         </TabsContent>
         <TabsContent value="commands">
-          <ComponentList :items="commands" :empty="query ? 'No commands match.' : 'No commands.'" />
+          <ComponentList
+            :key="query"
+            :items="commands"
+            :empty="query ? 'No commands match.' : 'No commands.'"
+          />
         </TabsContent>
       </Tabs>
 

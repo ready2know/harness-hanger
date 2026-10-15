@@ -4,12 +4,18 @@ use std::path::{Component as PathPart, Path, PathBuf};
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 use serde::Serialize;
+use serde_json::{Map, Value};
 
-use super::scan::{self, MarketplacePreview, PluginPreview, PluginSource};
+use super::scan::{
+    self, Component, ComponentKind, MarketplacePreview, PluginPreview, PluginSource,
+};
 use super::source::MarketplaceSource;
 use crate::harness::claude_code::UserPlugins;
 use crate::harness::{self, Discovery, HarnessAdapter, ImportItem, PluginStatus};
-use crate::{Error, Result, git, paths, store};
+use crate::{Error, Result, frontmatter, git, paths, store};
+
+/// The names a plugin's README can have, in the order they are tried.
+const README: &[&str] = &["README.md", "readme.md", "Readme.md"];
 
 /// The marketplaces a person added to harness-hanger, kept in its own database.
 ///
@@ -58,6 +64,59 @@ pub struct CatalogPlugin {
     pub marketplace: String,
     pub status: PluginStatus,
     pub plugin: PluginPreview,
+}
+
+/// A plugin of a catalog marketplace, for its own page.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDetails {
+    pub marketplace: MarketplaceSummary,
+    pub status: PluginStatus,
+    pub plugin: PluginPreview,
+    /// The README in the plugin's directory, when there is one that can be read.
+    pub readme: Option<String>,
+    /// The plugin in a browser: its directory on GitHub, or the repository it is installed from.
+    pub web_url: Option<String>,
+}
+
+/// A skill, an agent, or a command of a catalog marketplace, for its own page.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentDetails {
+    pub marketplace: MarketplaceSummary,
+    /// The status of the plugin that provides it.
+    pub status: PluginStatus,
+    pub plugin: PluginPreview,
+    pub kind: ComponentKind,
+    pub component: Component,
+    /// `None` for a command written inline in a manifest, or when `file_error` is set.
+    pub file: Option<ComponentFile>,
+    /// Why the file cannot be read.
+    pub file_error: Option<String>,
+    /// The file on GitHub, for a marketplace cloned from there.
+    pub web_url: Option<String>,
+}
+
+/// The file that defines a component.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentFile {
+    /// The whole file.
+    pub text: String,
+    /// The top-level frontmatter fields.
+    pub frontmatter: Map<String, Value>,
+    /// The Markdown after the frontmatter.
+    pub body: String,
+}
+
+impl ComponentFile {
+    fn new(text: String) -> Self {
+        Self {
+            frontmatter: frontmatter::fields(&text),
+            body: frontmatter::parse(&text).body.to_owned(),
+            text,
+        }
+    }
 }
 
 /// The plugins of the catalog's marketplaces, and the marketplaces that could not be read.
@@ -261,10 +320,7 @@ impl Catalog {
                     plugins.extend(preview.plugins.into_iter().map(|plugin| CatalogPlugin {
                         marketplace_id: summary.id,
                         marketplace: preview.name.clone(),
-                        status: match plugin.source {
-                            PluginSource::Harness { .. } => PluginStatus::Enabled,
-                            _ => claude.status(&plugin.name, &preview.name),
-                        },
+                        status: status(&plugin, &preview.name, claude),
                         plugin,
                     }));
                 }
@@ -279,6 +335,97 @@ impl Catalog {
             plugins,
             unreadable,
         })
+    }
+
+    /// A plugin of the marketplace `id`, with its status in Claude Code and its README.
+    pub fn plugin_details(
+        &self,
+        id: i64,
+        name: &str,
+        claude: &UserPlugins,
+    ) -> Result<PluginDetails> {
+        let (marketplace, status, plugin) = self.find_plugin(id, name, claude)?;
+        let (readme, web_url) = match &plugin.source {
+            PluginSource::Local { path } => {
+                (readme(&marketplace, path), github_url(&marketplace, path))
+            }
+            PluginSource::External { source, location } => {
+                (None, external_url(source, location.as_deref()))
+            }
+            PluginSource::Harness { .. } => (None, None),
+        };
+        Ok(PluginDetails {
+            marketplace,
+            status,
+            plugin,
+            readme,
+            web_url,
+        })
+    }
+
+    /// A skill, an agent, or a command of the plugin `plugin` in the marketplace `id`, with its file.
+    ///
+    /// The file is read as the scan reads it: one that links outside a marketplace is not read.
+    pub fn component_details(
+        &self,
+        id: i64,
+        plugin: &str,
+        kind: ComponentKind,
+        name: &str,
+        claude: &UserPlugins,
+    ) -> Result<ComponentDetails> {
+        let (marketplace, status, plugin) = self.find_plugin(id, plugin, claude)?;
+        let component = plugin
+            .components(kind)
+            .iter()
+            .find(|component| component.name == name)
+            .cloned()
+            .ok_or_else(|| Error::ComponentNotFound {
+                plugin: plugin.name.clone(),
+                kind: kind.noun(),
+                name: name.to_owned(),
+            })?;
+        let (file, file_error) = match &component.path {
+            None => (None, None),
+            Some(path) => match read_file(&marketplace, path) {
+                Ok(text) => (Some(ComponentFile::new(text)), None),
+                Err(error) => (None, Some(error.to_string())),
+            },
+        };
+        let web_url = component
+            .path
+            .as_deref()
+            .and_then(|path| github_url(&marketplace, path));
+        Ok(ComponentDetails {
+            marketplace,
+            status,
+            plugin,
+            kind,
+            component,
+            file,
+            file_error,
+            web_url,
+        })
+    }
+
+    fn find_plugin(
+        &self,
+        id: i64,
+        name: &str,
+        claude: &UserPlugins,
+    ) -> Result<(MarketplaceSummary, PluginStatus, PluginPreview)> {
+        let marketplace = self.get(id)?;
+        let preview = self.read(&marketplace.source, &marketplace.root)?;
+        let plugin = preview
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.name == name)
+            .ok_or_else(|| Error::PluginNotFound {
+                marketplace: preview.name.clone(),
+                plugin: name.to_owned(),
+            })?;
+        let status = status(&plugin, &preview.name, claude);
+        Ok((marketplace, status, plugin))
     }
 
     /// Removes a marketplace and, for a GitHub source, its clone. A local directory, and a
@@ -406,6 +553,97 @@ impl Catalog {
             Err(error) => summary.error = Some(error.to_string()),
         }
         summary
+    }
+}
+
+/// Reads a file that the scan of `marketplace` found, following symlinks only where the scan
+/// does.
+fn read_file(marketplace: &MarketplaceSummary, path: &Path) -> Result<String> {
+    let follow_links_out = matches!(marketplace.source, MarketplaceSource::Harness { .. });
+    scan::read_inside(&marketplace.root, path, follow_links_out)
+}
+
+/// The README in `dir`. A plugin without one, or with one that cannot be read, shows none.
+fn readme(marketplace: &MarketplaceSummary, dir: &Path) -> Option<String> {
+    README
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+        .and_then(|path| read_file(marketplace, &path).ok())
+}
+
+/// `path` on GitHub, at the commit of the clone, for a marketplace cloned from there.
+fn github_url(marketplace: &MarketplaceSummary, path: &Path) -> Option<String> {
+    let MarketplaceSource::GitHub { owner, repo } = &marketplace.source else {
+        return None;
+    };
+    let relative = path.strip_prefix(&marketplace.root).ok()?;
+    // A path that leaves the clone, such as a plugin source with `..`, is not in the repository.
+    let inside = relative
+        .components()
+        .all(|part| matches!(part, PathPart::Normal(_)));
+    if !inside || !path.exists() {
+        return None;
+    }
+    // The default branch, when the clone cannot say which commit it has.
+    let commit = git::head(&marketplace.root).unwrap_or_else(|_| "HEAD".to_owned());
+    Some(github_page(owner, repo, &commit, relative, path.is_dir()))
+}
+
+/// A plugin's status in Claude Code. A harness's own skills, agents, and commands are always
+/// enabled: it loads them for the user.
+fn status(plugin: &PluginPreview, marketplace: &str, claude: &UserPlugins) -> PluginStatus {
+    match plugin.source {
+        PluginSource::Harness { .. } => PluginStatus::Enabled,
+        _ => claude.status(&plugin.name, marketplace),
+    }
+}
+
+/// The page of `relative` in a GitHub repository at `commit`: a directory, or a file.
+fn github_page(owner: &str, repo: &str, commit: &str, relative: &Path, is_dir: bool) -> String {
+    let parts: Vec<_> = relative
+        .components()
+        .filter_map(|part| match part {
+            PathPart::Normal(name) => Some(encode_segment(&name.to_string_lossy())),
+            _ => None,
+        })
+        .collect();
+    let view = if is_dir || parts.is_empty() {
+        "tree"
+    } else {
+        "blob"
+    };
+    let base = format!("https://github.com/{owner}/{repo}/{view}/{commit}");
+    if parts.is_empty() {
+        base
+    } else {
+        format!("{base}/{}", parts.join("/"))
+    }
+}
+
+/// Percent-encodes one segment of a URL path.
+fn encode_segment(segment: &str) -> String {
+    segment
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
+}
+
+/// The repository of a plugin that is installed from elsewhere, when a browser can show it.
+fn external_url(source: &str, location: Option<&str>) -> Option<String> {
+    let location = location?;
+    match source {
+        "github" => Some(format!("https://github.com/{location}")),
+        "url" if location.starts_with("https://") => {
+            Some(location.strip_suffix(".git").unwrap_or(location).to_owned())
+        }
+        _ => None,
     }
 }
 
@@ -570,6 +808,174 @@ mod tests {
         assert_eq!(status("remote"), PluginStatus::NotInstalled);
     }
 
+    fn nothing_installed() -> UserPlugins {
+        UserPlugins::read(tempfile::tempdir().unwrap().path()).unwrap()
+    }
+
+    #[test]
+    fn shows_a_plugin_with_its_readme() {
+        let data = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let id = catalog.add(&local(&fixture())).unwrap().id;
+
+        let details = catalog
+            .plugin_details(id, "standard", &nothing_installed())
+            .unwrap();
+
+        assert_eq!(details.marketplace.id, id);
+        assert_eq!(details.status, PluginStatus::NotInstalled);
+        assert_eq!(details.plugin.version.as_deref(), Some("1.2.0"));
+        assert_eq!(
+            details.readme.as_deref(),
+            Some("# Standard\n\nA plugin for tests.\n")
+        );
+        // Only a GitHub marketplace has a page in a browser.
+        assert_eq!(details.web_url, None);
+        assert_eq!(
+            catalog
+                .plugin_details(id, "remote", &nothing_installed())
+                .unwrap()
+                .web_url
+                .as_deref(),
+            Some("https://github.com/acme/remote")
+        );
+    }
+
+    #[test]
+    fn shows_a_component_with_its_file() {
+        let data = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let id = catalog.add(&local(&fixture())).unwrap().id;
+
+        let details = catalog
+            .component_details(
+                id,
+                "standard",
+                ComponentKind::Skill,
+                "alpha-skill",
+                &nothing_installed(),
+            )
+            .unwrap();
+
+        assert_eq!(details.plugin.name, "standard");
+        assert_eq!(details.kind, ComponentKind::Skill);
+        assert_eq!(
+            details.component.path,
+            Some(fixture().join("plugins/standard/skills/alpha/SKILL.md"))
+        );
+        assert_eq!(details.file_error, None);
+        let file = details.file.unwrap();
+        assert!(file.text.starts_with("---\nname: alpha-skill\n"));
+        assert_eq!(file.body, "\n# Alpha\n\nDo alpha things.\n");
+        assert_eq!(
+            file.frontmatter.get("allowed-tools"),
+            Some(&serde_json::json!(["Read", "Grep"]))
+        );
+    }
+
+    #[test]
+    fn an_inline_command_has_no_file() {
+        let data = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let id = catalog.add(&local(&fixture())).unwrap().id;
+
+        let details = catalog
+            .component_details(
+                id,
+                "inline",
+                ComponentKind::Command,
+                "hello",
+                &nothing_installed(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            details.component.description.as_deref(),
+            Some("Greets you.")
+        );
+        assert!(details.file.is_none() && details.file_error.is_none());
+    }
+
+    #[test]
+    fn names_the_plugin_or_component_that_is_not_there() {
+        let data = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let id = catalog.add(&local(&fixture())).unwrap().id;
+        let claude = nothing_installed();
+
+        let error = catalog.plugin_details(id, "nope", &claude).unwrap_err();
+        assert_eq!(error.to_string(), "fixture-market has no plugin named nope");
+
+        let error = catalog
+            .component_details(id, "standard", ComponentKind::Agent, "alpha-skill", &claude)
+            .unwrap_err();
+        assert_eq!(error.to_string(), "standard has no agent named alpha-skill");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_read_a_component_file_that_links_outside_the_marketplace() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("secret"), "Secret.").unwrap();
+        let root = tmp.path().join("market");
+        fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        fs::write(
+            root.join(".claude-plugin/marketplace.json"),
+            r#"{ "name": "links", "plugins": [{ "name": "p", "source": "./" }] }"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("skills/evil")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("secret"), root.join("skills/evil/SKILL.md"))
+            .unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("secret"), root.join("README.md")).unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let id = catalog.add(&local(&root)).unwrap().id;
+        let claude = nothing_installed();
+
+        let details = catalog
+            .component_details(id, "p", ComponentKind::Skill, "evil", &claude)
+            .unwrap();
+
+        assert!(details.file.is_none());
+        assert!(
+            details
+                .file_error
+                .is_some_and(|error| error.contains("links outside the marketplace")),
+        );
+        assert_eq!(
+            catalog.plugin_details(id, "p", &claude).unwrap().readme,
+            None
+        );
+    }
+
+    #[test]
+    fn links_to_files_and_directories_on_github() {
+        let page =
+            |path: &str, is_dir| github_page("acme", "tools", "abc123", Path::new(path), is_dir);
+
+        assert_eq!(
+            page("plugins/review/skills/my skill/SKILL.md", false),
+            "https://github.com/acme/tools/blob/abc123/plugins/review/skills/my%20skill/SKILL.md"
+        );
+        assert_eq!(
+            page("plugins/review", true),
+            "https://github.com/acme/tools/tree/abc123/plugins/review"
+        );
+        assert_eq!(page("", true), "https://github.com/acme/tools/tree/abc123");
+    }
+
+    #[test]
+    fn links_only_to_external_sources_that_a_browser_can_show() {
+        assert_eq!(
+            external_url("url", Some("https://example.com/mono.git")).as_deref(),
+            Some("https://example.com/mono")
+        );
+        assert_eq!(external_url("url", Some("git@example.com:mono.git")), None);
+        assert_eq!(external_url("npm", Some("@acme/plugin")), None);
+        assert_eq!(external_url("github", None), None);
+    }
+
     #[test]
     fn keeps_the_catalog_between_openings() {
         let data = tempfile::tempdir().unwrap();
@@ -731,6 +1137,44 @@ mod tests {
             String::from_utf8_lossy(&origin.stdout).trim(),
             "https://github.com/hanger-test-no-such-owner/acme.git"
         );
+    }
+
+    #[test]
+    fn links_a_component_of_a_github_marketplace_to_its_file_at_the_cloned_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = claude_home(tmp.path());
+        let copy = claude.join("plugins/marketplaces/acme");
+        fs::write(
+            copy.join(".claude-plugin/marketplace.json"),
+            r#"{ "name": "acme", "plugins": [{ "name": "p", "source": "./p" }] }"#,
+        )
+        .unwrap();
+        fs::create_dir_all(copy.join("p/skills/my skill")).unwrap();
+        fs::write(
+            copy.join("p/skills/my skill/SKILL.md"),
+            "---\nname: s\n---\n",
+        )
+        .unwrap();
+        git_repo(&copy);
+        let catalog = import_catalog(&tmp.path().join("data"), &claude);
+        let id = catalog
+            .import("claude-code", &marketplace("acme"))
+            .unwrap()
+            .id;
+        let commit = git::head(&copy).unwrap();
+        let claude_plugins = nothing_installed();
+
+        let skill = catalog
+            .component_details(id, "p", ComponentKind::Skill, "s", &claude_plugins)
+            .unwrap();
+        let plugin = catalog.plugin_details(id, "p", &claude_plugins).unwrap();
+
+        let repo = "https://github.com/hanger-test-no-such-owner/acme";
+        assert_eq!(
+            skill.web_url.unwrap(),
+            format!("{repo}/blob/{commit}/p/skills/my%20skill/SKILL.md")
+        );
+        assert_eq!(plugin.web_url.unwrap(), format!("{repo}/tree/{commit}/p"));
     }
 
     #[test]

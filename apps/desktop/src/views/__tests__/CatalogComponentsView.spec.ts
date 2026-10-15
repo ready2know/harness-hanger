@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { listCatalogPlugins } from '@/lib/api'
 import CatalogComponentsView from '../CatalogComponentsView.vue'
 import { catalogPlugins, movedMarketplace } from './catalogFixtures'
+import { stubRouter } from './stubRouter'
 
 vi.mock('@/lib/api', () => ({ listCatalogPlugins: vi.fn<typeof listCatalogPlugins>() }))
 
@@ -15,18 +15,7 @@ beforeEach(() => {
 })
 
 async function mountView(kind: 'skills' | 'agents') {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { render: () => null } },
-      { path: '/marketplace', name: 'marketplace', component: { render: () => null } },
-      {
-        path: '/marketplace/:id',
-        name: 'marketplace-preview',
-        component: { render: () => null },
-      },
-    ],
-  })
+  const router = stubRouter()
   const wrapper = mount(CatalogComponentsView, {
     props: { kind },
     global: { plugins: [router] },
@@ -57,7 +46,12 @@ describe('CatalogComponentsView', () => {
       { name: 'review-pr', status: 'Enabled' },
       { name: 'write-docs', status: 'Disabled' },
     ])
-    expect(wrapper.get('li a').attributes('href')).toBe('/marketplace/2')
+    const links = wrapper.findAll('li')[0]!.findAll('a')
+    expect(links.map((link) => link.attributes('href'))).toEqual([
+      '/skills/2/deploy/deploy-app',
+      '/plugins/2/deploy',
+      '/marketplace/2',
+    ])
   })
 
   it('filters by status and counts each status', async () => {
@@ -87,6 +81,32 @@ describe('CatalogComponentsView', () => {
     expect(wrapper.get('h1').text()).toBe('Agents')
     expect(rows(wrapper)).toEqual([{ name: 'security', status: 'Enabled' }])
     expect(wrapper.get<HTMLInputElement>('input[aria-label="Search"]').element.value).toBe('')
+  })
+
+  it('shows the skills a page at a time, and starts again at the first page on a new search', async () => {
+    const skills = Array.from({ length: 30 }, (_, index) => ({
+      name: `skill-${String(index).padStart(2, '0')}`,
+      description: 'A skill.',
+      path: `/m/skill-${index}/SKILL.md`,
+    }))
+    const review = catalogPlugins[0]!
+    vi.mocked(listCatalogPlugins).mockResolvedValue({
+      plugins: [{ ...review, plugin: { ...review.plugin, skills } }],
+      unreadable: [],
+    })
+    const wrapper = await mountView('skills')
+    expect(rows(wrapper)).toHaveLength(10)
+
+    await wrapper
+      .findAll('[data-slot="pagination-item"]')
+      .find((item) => item.text() === '3')!
+      .trigger('click')
+    expect(rows(wrapper).map((row) => row.name)).toEqual(
+      skills.slice(20).map((skill) => skill.name),
+    )
+
+    await wrapper.get('input[aria-label="Search"]').setValue('skill-')
+    expect(rows(wrapper)[0]!.name).toBe('skill-00')
   })
 
   it('points to the Marketplaces page when there is nothing to list', async () => {
@@ -148,6 +168,8 @@ describe('CatalogComponentsView', () => {
 
     expect(wrapper.get('li').text()).toContain('Standalone in Claude Code')
     expect(wrapper.get('li').text()).not.toContain('claude-code ·')
+    // The page of a harness's own skill goes through the harness's ID.
+    expect(wrapper.get('li a').attributes('href')).toBe('/skills/9/claude-code/lint')
   })
 
   it('shows why the catalog could not be read', async () => {

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
 
 import {
   getMarketplaceDetails,
@@ -9,6 +8,7 @@ import {
   type PluginPreview,
 } from '@/lib/api'
 import MarketplacePreviewView from '../MarketplacePreviewView.vue'
+import { stubRouter } from './stubRouter'
 
 vi.mock('@/lib/api', () => ({
   getMarketplaceDetails: vi.fn<typeof getMarketplaceDetails>(),
@@ -24,6 +24,10 @@ function plugin(overrides: Partial<PluginPreview>): PluginPreview {
     version: null,
     author: null,
     category: null,
+    keywords: [],
+    homepage: null,
+    repository: null,
+    license: null,
     source: { kind: 'local', path: '/m/plugins/plugin' },
     skills: [],
     agents: [],
@@ -70,18 +74,7 @@ const details: MarketplaceDetails = {
 }
 
 async function mountView() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/marketplace', name: 'marketplace', component: { render: () => null } },
-      {
-        path: '/marketplace/:id',
-        name: 'marketplace-preview',
-        component: MarketplacePreviewView,
-        props: (route) => ({ id: Number(route.params.id) }),
-      },
-    ],
-  })
+  const router = stubRouter()
   await router.push('/marketplace/3')
   const wrapper = mount(MarketplacePreviewView, {
     props: { id: 3 },

@@ -1,12 +1,16 @@
 import type { CatalogPlugin, MarketplaceSummary, PluginPreview } from '@/lib/api'
 
-function plugin(overrides: Partial<PluginPreview>): PluginPreview {
+export function plugin(overrides: Partial<PluginPreview>): PluginPreview {
   return {
     name: 'plugin',
     description: null,
     version: null,
     author: null,
     category: null,
+    keywords: [],
+    homepage: null,
+    repository: null,
+    license: null,
     source: { kind: 'local', path: '/m/plugin' },
     skills: [],
     agents: [],

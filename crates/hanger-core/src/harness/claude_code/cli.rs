@@ -58,6 +58,15 @@ impl PluginChange {
     }
 }
 
+fn switch(plugin: &str, scope: Scope, enabled: bool) -> PluginChange {
+    let plugin = plugin.to_owned();
+    if enabled {
+        PluginChange::Enable { plugin, scope }
+    } else {
+        PluginChange::Disable { plugin, scope }
+    }
+}
+
 /// One change at a time: `claude` writes settings files and clones marketplaces, and two runs at
 /// once, such as two installs from one new marketplace, could get in each other's way.
 static CHANGES: Mutex<()> = Mutex::new(());
@@ -163,7 +172,7 @@ impl ClaudeCode {
     /// is installed, unless the person's own settings decide it already.
     pub fn set_enabled(&self, project: &Path, plugin: &str, enabled: bool) -> Result<()> {
         let _guard = one_at_a_time();
-        let installed = self.installed_here(project, plugin)?;
+        let installed = self.installed(Some(project), plugin)?;
         let base = match installed.installed_in {
             Scope::User => Scope::Local,
             scope => scope,
@@ -171,20 +180,28 @@ impl ClaudeCode {
         let scope = installed
             .decided_by
             .map_or(base, |decided_by| decided_by.max(base));
-        let plugin = plugin.to_owned();
+        self.run(project, &switch(&installed.id, scope, enabled))?;
+        self.check_enabled(Some(project), &installed.id, enabled)
+    }
+
+    /// Switches `plugin`, installed for the user, on or off in the user's settings, and checks
+    /// that it took effect. A project whose own settings decide the plugin keeps its choice.
+    pub fn set_enabled_for_user(&self, plugin: &str, enabled: bool) -> Result<()> {
+        let _guard = one_at_a_time();
+        let installed = self.installed(None, plugin)?;
+        // No project takes part, so `claude` runs outside every project.
         self.run(
-            project,
-            &if enabled {
-                PluginChange::Enable { plugin, scope }
-            } else {
-                PluginChange::Disable { plugin, scope }
-            },
+            &env::temp_dir(),
+            &switch(&installed.id, Scope::User, enabled),
         )?;
-        let now = self.installed_here(project, &installed.id)?;
+        self.check_enabled(None, &installed.id, enabled)
+    }
+
+    fn check_enabled(&self, project: Option<&Path>, plugin: &str, enabled: bool) -> Result<()> {
+        let now = self.installed(project, plugin)?;
         if now.enabled != enabled {
             return Err(Error::Harness(format!(
-                "{} is still {}: other settings decide it",
-                installed.id,
+                "{plugin} is still {}: other settings decide it",
                 if now.enabled { "on" } else { "off" }
             )));
         }
@@ -195,7 +212,7 @@ impl ClaudeCode {
     /// the project's to remove, but it can be switched off there.
     pub fn uninstall_from_project(&self, project: &Path, plugin: &str) -> Result<()> {
         let _guard = one_at_a_time();
-        let installed = self.installed_here(project, plugin)?;
+        let installed = self.installed(Some(project), plugin)?;
         if installed.installed_in == Scope::User {
             return Err(Error::Harness(format!(
                 "{plugin} is installed for your user; switch it off in this project instead"
@@ -210,12 +227,20 @@ impl ClaudeCode {
         )
     }
 
-    fn installed_here(&self, project: &Path, plugin: &str) -> Result<ScopedPlugin> {
-        self.scope_state(Some(project))?
+    /// The plugin as it applies in `project`, or for the user when `project` is `None`.
+    fn installed(&self, project: Option<&Path>, plugin: &str) -> Result<ScopedPlugin> {
+        self.scope_state(project)?
             .plugins
             .into_iter()
             .find(|installed| installed.id == plugin)
-            .ok_or_else(|| Error::Harness(format!("{plugin} is not installed for this project")))
+            .ok_or_else(|| {
+                let place = if project.is_some() {
+                    "for this project"
+                } else {
+                    "for your user"
+                };
+                Error::Harness(format!("{plugin} is not installed {place}"))
+            })
     }
 
     /// Where Claude Code has the marketplace `name` from, when it knows one by that name.
@@ -594,8 +619,8 @@ mod tests {
         assert_eq!(calls(&log), Vec::<String>::new());
     }
 
-    /// A fake `claude` that applies `enable`/`disable` to the project's settings file for the
-    /// scope, as Claude Code does.
+    /// A fake `claude` that applies `enable`/`disable` to the settings file for the scope, as
+    /// Claude Code does.
     fn settings_writing_claude(dir: &Path, log: &Path) -> PathBuf {
         let script = dir.join("claude-writes");
         fs::write(
@@ -603,9 +628,13 @@ mod tests {
             format!(
                 r#"#!/bin/sh
 echo "$*" >> '{log}'
-case "$4" in local) file=.claude/settings.local.json ;; *) file=.claude/settings.json ;; esac
+case "$4" in
+  user) file="$CLAUDE_CONFIG_DIR/settings.json" ;;
+  local) file=.claude/settings.local.json ;;
+  *) file=.claude/settings.json ;;
+esac
 case "$2" in enable) value=true ;; *) value=false ;; esac
-mkdir -p .claude
+mkdir -p "$(dirname "$file")"
 echo "{{ \"enabledPlugins\": {{ \"$7\": $value }} }}" > "$file"
 echo '{{"outcome":"ok"}}'
 "#,
@@ -671,5 +700,67 @@ echo '{{"outcome":"ok"}}'
             ["plugin enable --scope project --json -- lint@acme"]
         );
         assert!(claude.scope_state(Some(&setup.project)).unwrap().plugins[0].enabled);
+    }
+
+    #[test]
+    fn switches_a_plugin_for_the_user_outside_every_project() {
+        let setup = setup("{}", r#"{"plugins":{"review@acme":[{"scope":"user"}]}}"#);
+        let log = setup.config.join("calls.log");
+        let cli = settings_writing_claude(&setup.config, &log);
+        let claude = ClaudeCode::new(&setup.config).with_cli(&cli);
+
+        claude.set_enabled_for_user("review@acme", true).unwrap();
+        assert!(claude.scope_state(None).unwrap().plugins[0].enabled);
+
+        claude.set_enabled_for_user("review@acme", false).unwrap();
+        assert!(!claude.scope_state(None).unwrap().plugins[0].enabled);
+        assert_eq!(
+            calls(&log),
+            [
+                "plugin enable --scope user --json -- review@acme",
+                "plugin disable --scope user --json -- review@acme"
+            ]
+        );
+        assert!(!setup.project.join(".claude").exists());
+    }
+
+    #[test]
+    fn refuses_to_switch_a_plugin_that_is_not_installed_for_the_user() {
+        let setup = setup("{}", "{}");
+        let installed = serde_json::json!({ "plugins": {
+            "lint@acme": [{ "scope": "project", "projectPath": setup.project }]
+        } });
+        fs::write(
+            setup.config.join("plugins/installed_plugins.json"),
+            installed.to_string(),
+        )
+        .unwrap();
+        let (cli, log) = fake_claude(&setup.config, OK);
+        let claude = ClaudeCode::new(&setup.config).with_cli(&cli);
+
+        let error = claude.set_enabled_for_user("lint@acme", true).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Claude Code: lint@acme is not installed for your user"
+        );
+        assert_eq!(calls(&log), Vec::<String>::new());
+    }
+
+    #[test]
+    fn says_when_the_switch_did_not_take_effect() {
+        let setup = setup("{}", r#"{"plugins":{"review@acme":[{"scope":"user"}]}}"#);
+        // A `claude` that reports success without changing anything.
+        let (cli, _) = fake_claude(&setup.config, OK);
+        let claude = ClaudeCode::new(&setup.config).with_cli(&cli);
+
+        let error = claude
+            .set_enabled_for_user("review@acme", true)
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Claude Code: review@acme is still off: other settings decide it"
+        );
     }
 }

@@ -1,1 +1,10 @@
-{ "name": "standard", "version": "1.2.0", "description": "Ignored, the entry describes it.", "author": { "name": "Standard Author" } }
+{
+  "name": "standard",
+  "version": "1.2.0",
+  "description": "Ignored, the entry describes it.",
+  "author": { "name": "Standard Author" },
+  "keywords": ["review", "quality"],
+  "homepage": "https://example.com/ignored",
+  "repository": { "type": "git", "url": "https://github.com/acme/standard" },
+  "license": "MIT"
+}

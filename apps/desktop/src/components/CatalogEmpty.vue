@@ -18,7 +18,7 @@ defineProps<{ noun: string }>()
       </p>
     </div>
     <Button as-child>
-      <RouterLink :to="{ name: 'marketplace' }">Go to Marketplace</RouterLink>
+      <RouterLink :to="{ name: 'marketplace' }">Go to Marketplaces</RouterLink>
     </Button>
   </div>
 </template>

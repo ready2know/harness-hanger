@@ -55,7 +55,7 @@ describe('PluginsView', () => {
     ])
   })
 
-  it('points to the Marketplace page when there is nothing to list', async () => {
+  it('points to the Marketplaces page when there is nothing to list', async () => {
     vi.mocked(listCatalogPlugins).mockResolvedValue({ plugins: [], unreadable: [] })
 
     const wrapper = await mountView()

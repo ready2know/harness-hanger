@@ -39,7 +39,7 @@ function openPreview(marketplace: MarketplaceSummary) {
   <div class="mx-auto flex w-full max-w-4xl flex-col gap-6 p-8">
     <header class="flex items-start justify-between gap-4">
       <div class="flex flex-col gap-1">
-        <h1 class="text-2xl font-semibold">Marketplace</h1>
+        <h1 class="text-2xl font-semibold">Marketplaces</h1>
         <p class="text-muted-foreground text-sm">
           Plugin marketplaces you added. Open one to see its plugins, skills, agents, and commands.
         </p>

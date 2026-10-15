@@ -30,7 +30,7 @@ import { useProjectsStore } from '@/stores/projects'
 
 const dashboardItems: NavItem[] = [{ to: '/', title: 'Dashboard', icon: LayoutDashboardIcon }]
 const catalogItems: NavItem[] = [
-  { to: '/marketplace', title: 'Marketplace', icon: StoreIcon },
+  { to: '/marketplace', title: 'Marketplaces', icon: StoreIcon },
   { to: '/skills', title: 'Skills', icon: SparklesIcon },
   { to: '/agents', title: 'Agents', icon: BotIcon },
   { to: '/plugins', title: 'Plugins', icon: PuzzleIcon },

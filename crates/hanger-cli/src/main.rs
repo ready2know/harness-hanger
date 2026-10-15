@@ -1,9 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use hanger_core::AppInfo;
+use hanger_core::claude_code::{PluginStatus, UserPlugins};
 use hanger_core::marketplace::{
-    Catalog, Component, MarketplaceDetails, MarketplaceSource, MarketplaceSummary, PluginSource,
+    Catalog, CatalogPlugins, Component, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
+    PluginSource,
 };
+use hanger_core::{AppInfo, paths};
 use serde::Serialize;
 
 /// Manage AI harness components: skills, agents, plugins, marketplaces, hooks and MCP servers.
@@ -41,6 +43,9 @@ enum MarketplaceCommand {
         /// The ID that `marketplace ls` shows.
         id: i64,
     },
+    /// List the plugins of every marketplace in the catalog, and whether Claude Code has each one
+    /// enabled for the user.
+    Plugins,
     /// Remove a marketplace from the catalog. A local directory is not deleted.
     Rm {
         /// The ID that `marketplace ls` shows.
@@ -101,6 +106,14 @@ fn marketplace(command: MarketplaceCommand, json: bool) -> Result<()> {
                 return print_json(&details);
             }
             print_details(&details);
+        }
+        MarketplaceCommand::Plugins => {
+            let claude = UserPlugins::read(&paths::claude_config_dir()?)?;
+            let plugins = catalog.plugins(&claude)?;
+            if json {
+                return print_json(&plugins);
+            }
+            print_plugins(&plugins);
         }
         MarketplaceCommand::Rm { id } => {
             catalog.remove(id)?;
@@ -178,6 +191,39 @@ fn print_details(details: &MarketplaceDetails) {
         for warning in &preview.warnings {
             println!("  {}: {}", warning.path.display(), warning.message);
         }
+    }
+}
+
+fn print_plugins(catalog: &CatalogPlugins) {
+    for marketplace in &catalog.unreadable {
+        let error = marketplace.error.as_deref().unwrap_or("unknown error");
+        eprintln!("Skipped marketplace {}: {error}", marketplace.id);
+    }
+    if catalog.plugins.is_empty() {
+        println!("No plugins. Add a marketplace with `harness-hanger marketplace add <source>`.");
+        return;
+    }
+    for entry in &catalog.plugins {
+        let status = match entry.status {
+            PluginStatus::Enabled => "enabled",
+            PluginStatus::Disabled => "disabled",
+            PluginStatus::NotInstalled => "not installed",
+        };
+        let plugin = &entry.plugin;
+        let contents = if let PluginSource::External { .. } = plugin.source {
+            "external".to_owned()
+        } else {
+            format!(
+                "{} skills, {} agents, {} commands",
+                plugin.skills.len(),
+                plugin.agents.len(),
+                plugin.commands.len()
+            )
+        };
+        println!(
+            "{status:<13}  {}@{}  {contents}",
+            plugin.name, entry.marketplace
+        );
     }
 }
 

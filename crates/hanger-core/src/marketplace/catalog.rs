@@ -5,8 +5,9 @@ use std::path::{Component as PathPart, Path, PathBuf};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
 use serde::Serialize;
 
-use super::scan::{self, MarketplacePreview};
+use super::scan::{self, MarketplacePreview, PluginPreview};
 use super::source::MarketplaceSource;
+use crate::claude_code::{PluginStatus, UserPlugins};
 use crate::{Error, Result, git, paths, store};
 
 /// The marketplaces a person added to harness-hanger, kept in its own database.
@@ -41,6 +42,27 @@ pub struct MarketplaceDetails {
     pub summary: MarketplaceSummary,
     /// `None` when the manifest cannot be read. `summary.error` says why.
     pub preview: Option<MarketplacePreview>,
+}
+
+/// A plugin from one of the catalog's marketplaces, with its status in Claude Code.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogPlugin {
+    pub marketplace_id: i64,
+    /// The marketplace's name. Claude Code identifies the plugin as `plugin@marketplace`.
+    pub marketplace: String,
+    pub status: PluginStatus,
+    pub plugin: PluginPreview,
+}
+
+/// The plugins of the catalog's marketplaces, and the marketplaces that could not be read.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogPlugins {
+    pub plugins: Vec<CatalogPlugin>,
+    /// Left out because they cannot be read, for example after a local directory was moved.
+    /// Each one's `error` says why.
+    pub unreadable: Vec<MarketplaceSummary>,
 }
 
 struct Row {
@@ -133,6 +155,39 @@ impl Catalog {
         // Fails only when the manifest cannot be read, which `summary.error` already reports.
         let preview = scan::preview(&summary.root).ok();
         Ok(MarketplaceDetails { summary, preview })
+    }
+
+    /// Every plugin of the catalog's marketplaces, with its status in Claude Code.
+    ///
+    /// The status matches plugins by name and marketplace name, as Claude Code does.
+    pub fn plugins(&self, claude: &UserPlugins) -> Result<CatalogPlugins> {
+        let mut plugins = Vec::new();
+        let mut unreadable = Vec::new();
+        for mut summary in self.list()? {
+            if summary.error.is_some() {
+                unreadable.push(summary);
+                continue;
+            }
+            match scan::preview(&summary.root) {
+                Ok(preview) => {
+                    plugins.extend(preview.plugins.into_iter().map(|plugin| CatalogPlugin {
+                        marketplace_id: summary.id,
+                        marketplace: preview.name.clone(),
+                        status: claude.status(&plugin.name, &preview.name),
+                        plugin,
+                    }));
+                }
+                // The manifest changed since `list` read it.
+                Err(error) => {
+                    summary.error = Some(error.to_string());
+                    unreadable.push(summary);
+                }
+            }
+        }
+        Ok(CatalogPlugins {
+            plugins,
+            unreadable,
+        })
     }
 
     /// Removes a marketplace and, for a GitHub source, its clone. A local directory is left as is.
@@ -303,6 +358,60 @@ mod tests {
         assert_eq!(listed[0].id, added.id);
         let details = catalog.details(added.id).unwrap();
         assert_eq!(details.preview.unwrap().plugins.len(), 12);
+    }
+
+    #[test]
+    fn lists_the_plugins_of_every_marketplace_with_their_claude_code_status() {
+        let data = tempfile::tempdir().unwrap();
+        let moved = tempfile::tempdir().unwrap();
+        write_marketplace(moved.path(), "moved");
+        let claude = tempfile::tempdir().unwrap();
+        fs::create_dir_all(claude.path().join("plugins")).unwrap();
+        fs::write(
+            claude.path().join("plugins/installed_plugins.json"),
+            r#"{ "version": 2, "plugins": {
+                "standard@fixture-market": [{ "scope": "user" }],
+                "custom@fixture-market": [{ "scope": "user" }],
+                "bare@fixture-market": [{ "scope": "project", "projectPath": "/p" }]
+            } }"#,
+        )
+        .unwrap();
+        fs::write(
+            claude.path().join("settings.json"),
+            r#"{ "enabledPlugins": { "standard@fixture-market": true, "bare@fixture-market": true } }"#,
+        )
+        .unwrap();
+        let catalog = Catalog::open(data.path()).unwrap();
+        let fixture_id = catalog.add(&local(&fixture())).unwrap().id;
+        catalog.add(&local(moved.path())).unwrap();
+        fs::remove_dir_all(moved.path()).unwrap();
+
+        let CatalogPlugins {
+            plugins,
+            unreadable,
+        } = catalog
+            .plugins(&UserPlugins::read(claude.path()).unwrap())
+            .unwrap();
+
+        // The moved marketplace is reported apart, and the fixture's 12 plugins are listed.
+        assert_eq!(plugins.len(), 12);
+        assert_eq!(unreadable.len(), 1);
+        assert!(
+            unreadable[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("the directory does not exist"))
+        );
+        let status = |name: &str| {
+            let found = plugins.iter().find(|p| p.plugin.name == name).unwrap();
+            assert_eq!(found.marketplace, "fixture-market");
+            assert_eq!(found.marketplace_id, fixture_id);
+            found.status
+        };
+        assert_eq!(status("standard"), PluginStatus::Enabled);
+        assert_eq!(status("custom"), PluginStatus::Disabled);
+        assert_eq!(status("bare"), PluginStatus::NotInstalled);
+        assert_eq!(status("remote"), PluginStatus::NotInstalled);
     }
 
     #[test]

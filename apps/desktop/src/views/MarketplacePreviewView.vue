@@ -24,13 +24,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  getMarketplaceDetails,
-  removeMarketplace,
-  type MarketplaceDetails,
-  type PluginPreview,
-} from '@/lib/api'
-import { count, formatSource, relativePath } from '@/lib/format'
+import { getMarketplaceDetails, removeMarketplace, type MarketplaceDetails } from '@/lib/api'
+import { count, formatSource, pluginContents, relativePath } from '@/lib/format'
 
 const props = defineProps<{ id: number }>()
 
@@ -90,16 +85,6 @@ function componentsOf(kind: 'skills' | 'agents' | 'commands') {
 const skills = computed(() => componentsOf('skills'))
 const agents = computed(() => componentsOf('agents'))
 const commands = computed(() => componentsOf('commands'))
-
-function contents(plugin: PluginPreview): string {
-  if (plugin.source.kind === 'external') return 'Installed from elsewhere; contents unknown'
-  const parts = [
-    plugin.skills.length && count(plugin.skills.length, 'skill'),
-    plugin.agents.length && count(plugin.agents.length, 'agent'),
-    plugin.commands.length && count(plugin.commands.length, 'command'),
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : 'No skills, agents, or commands'
-}
 
 function setRemoveOpen(value: boolean) {
   // Stays open while removing, so that a failure is seen.
@@ -217,7 +202,7 @@ async function remove() {
               <p v-if="plugin.description" class="text-muted-foreground line-clamp-2">
                 {{ plugin.description }}
               </p>
-              <p class="text-muted-foreground text-xs">{{ contents(plugin) }}</p>
+              <p class="text-muted-foreground text-xs">{{ pluginContents(plugin) }}</p>
             </li>
           </ul>
         </TabsContent>

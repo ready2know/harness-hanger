@@ -85,6 +85,30 @@ export function getMarketplaceDetails(id: number): Promise<MarketplaceDetails> {
   return invoke<MarketplaceDetails>('marketplace_details', { id })
 }
 
+/** Mirrors `hanger_core::claude_code::PluginStatus`: the plugin's state for the user, in every project. */
+export type PluginStatus = 'enabled' | 'disabled' | 'notInstalled'
+
+/** Mirrors `hanger_core::marketplace::CatalogPlugin`. */
+export interface CatalogPlugin {
+  marketplaceId: number
+  /** Claude Code identifies the plugin as `plugin@marketplace`. */
+  marketplace: string
+  status: PluginStatus
+  plugin: PluginPreview
+}
+
+/** Mirrors `hanger_core::marketplace::CatalogPlugins`. */
+export interface CatalogPlugins {
+  plugins: CatalogPlugin[]
+  /** Marketplaces left out because they cannot be read. Each one's `error` says why. */
+  unreadable: MarketplaceSummary[]
+}
+
+/** Every plugin in the catalog's marketplaces, with its status in Claude Code. */
+export function listCatalogPlugins(): Promise<CatalogPlugins> {
+  return invoke<CatalogPlugins>('list_catalog_plugins')
+}
+
 export function removeMarketplace(id: number): Promise<void> {
   return invoke<void>('remove_marketplace', { id })
 }

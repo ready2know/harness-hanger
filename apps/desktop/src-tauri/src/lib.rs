@@ -1,7 +1,8 @@
-use hanger_core::AppInfo;
+use hanger_core::claude_code::UserPlugins;
 use hanger_core::marketplace::{
-    Catalog, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
+    Catalog, CatalogPlugins, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
 };
+use hanger_core::{AppInfo, paths};
 
 #[tauri::command]
 fn app_info() -> AppInfo {
@@ -22,6 +23,12 @@ async fn add_marketplace(source: String) -> Result<MarketplaceSummary, String> {
 #[tauri::command]
 async fn marketplace_details(id: i64) -> Result<MarketplaceDetails, String> {
     with_catalog(move |catalog| catalog.details(id)).await
+}
+
+/// Every plugin in the catalog, with its status in Claude Code for the user.
+#[tauri::command]
+async fn list_catalog_plugins() -> Result<CatalogPlugins, String> {
+    with_catalog(|catalog| catalog.plugins(&UserPlugins::read(&paths::claude_config_dir()?)?)).await
 }
 
 #[tauri::command]
@@ -63,6 +70,7 @@ pub fn run() {
             list_marketplaces,
             add_marketplace,
             marketplace_details,
+            list_catalog_plugins,
             remove_marketplace,
         ])
         .run(tauri::generate_context!())

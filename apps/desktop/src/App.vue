@@ -2,6 +2,7 @@
 import { useLocalStorage } from '@vueuse/core'
 import { RouterView } from 'vue-router'
 
+import AppContextMenu from '@/components/AppContextMenu.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 
@@ -11,10 +12,12 @@ const sidebarOpen = useLocalStorage('sidebar-open', true)
 </script>
 
 <template>
-  <SidebarProvider v-model:open="sidebarOpen">
-    <AppSidebar />
-    <SidebarInset>
-      <RouterView />
-    </SidebarInset>
-  </SidebarProvider>
+  <AppContextMenu>
+    <SidebarProvider v-model:open="sidebarOpen">
+      <AppSidebar />
+      <SidebarInset>
+        <RouterView />
+      </SidebarInset>
+    </SidebarProvider>
+  </AppContextMenu>
 </template>

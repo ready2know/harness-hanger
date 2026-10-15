@@ -18,9 +18,15 @@ beforeEach(() => {
 async function mountAt(path: string) {
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push(path)
-  const wrapper = mount(App, { global: { plugins: [router] } })
+  // Attached, so that events reach document listeners and portalled menus and dialogs.
+  const wrapper = mount(App, { global: { plugins: [router] }, attachTo: document.body })
   await flushPromises()
   return wrapper
+}
+
+/** Menus and dialogs are portalled to `<body>`, outside the wrapper. */
+function bodyElement(selector: string) {
+  return document.body.querySelector<HTMLElement>(selector)
 }
 
 describe('App sidebar', () => {
@@ -61,5 +67,41 @@ describe('App sidebar', () => {
     const wrapper = await mountAt('/')
 
     expect(wrapper.get('[data-slot="sidebar"]').attributes('data-state')).toBe('collapsed')
+  })
+})
+
+describe('App context menu', () => {
+  async function rightClick(element: Element) {
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    element.dispatchEvent(event)
+    await flushPromises()
+    return event
+  }
+
+  it('replaces the system menu with the app menu', async () => {
+    const wrapper = await mountAt('/')
+
+    const event = await rightClick(wrapper.get('h1').element)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(bodyElement('[data-slot="context-menu-content"]')?.textContent).toContain('About')
+  })
+
+  it('suppresses the system menu outside the app tree too', async () => {
+    await mountAt('/')
+
+    const event = await rightClick(document.body)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('shows the app version in the About dialog', async () => {
+    const wrapper = await mountAt('/')
+    await rightClick(wrapper.get('h1').element)
+
+    bodyElement('[data-slot="context-menu-item"]')?.click()
+    await flushPromises()
+
+    expect(bodyElement('[data-slot="dialog-content"]')?.textContent).toContain('Version 1.2.3')
   })
 })

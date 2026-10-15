@@ -10,15 +10,23 @@ plugins, and the marketplaces they come from.
 
 - **Global dashboard.** See every component installed for your user, edit it, and keep a backlog
   of components you plan to build.
-- **Project scope.** Open a project to see which components apply there and where each one comes
-  from. Add, remove, enable, or disable them for that project only.
+- **Project scope.** Add any folder as a project to see which components apply there and where
+  each one comes from. Add, remove, enable, or disable them for that project only.
 - **Usage statistics.** A harness hook records which skills, agents, commands, and MCP tools run,
-  so you can see what you use and what is dead weight. All data stays on your machine.
+  and whether the agent or you started them, so you can see what you use and what is dead weight.
+  All data stays on your machine.
+- **Marketplaces.** Browse marketplaces and install from them into one or more agents, globally
+  or for one project.
+- **Collections.** Group components into a set, apply it to a project, or share it as a file.
+- **Tester.** Run an agent with a prompt in a folder you choose, and check that it uses a skill or
+  subagent.
+- **Workflows.** Describe a sequence of steps that use skills, agents, and plugins. Run it with
+  one call, or share it as a file.
 - **Desktop app and CLI.** Both use one Rust core. The CLI has `--json` output for scripts and
   agents.
 
-Claude Code is supported first. The core is built around harness adapters, so other harnesses can
-be added later.
+Claude Code is supported first. The core is built around harness adapters. Cursor, Hermes, Codex,
+and pi are planned next.
 
 ## Repository layout
 

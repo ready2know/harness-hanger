@@ -33,7 +33,8 @@ harness-hanger is a manager for harness components, with two surfaces over one R
    each one comes from. Add new ones, and remove or disable others, for that project only.
 4. **Usage statistics.** Record which skills, agents, commands, and MCP tools run, and whether the
    agent or a human started each one. Show what is used, how often, where, and what is never used.
-5. **Marketplaces.** Browse known marketplaces and install from them into one or more agents
+5. **Marketplaces.** Add marketplaces from GitHub or from a local clone, and preview the plugins,
+   skills, agents, and commands that each one contains. Install from them into one or more agents
    (Claude Code, Cursor, Hermes, Codex, pi), globally or for one project.
 6. **Collections.** Group components into a named set. Apply the set to a project in one action, or
    export it to a file and import it on another machine.
@@ -54,9 +55,10 @@ desktop platforms.
 | --- | --- | --- |
 | Harnesses | Claude Code first, then Cursor, Hermes, Codex, and pi | Changed on 2026-10-15. The earlier decision was "Claude Code only for the first releases". Installing marketplace components into several agents is now a planned feature (AIM-5). Each agent gets its own `HarnessAdapter`. Claude Code stays the first and most complete adapter. |
 | Source of truth | The harness's own files | harness-hanger reads and writes `settings.json`, `.claude/`, plugin directories, and so on directly. It never keeps a shadow copy of installed state. |
-| Own storage | SQLite | Only for data the harness does not keep: usage events, backlog items, notes, and the project list. |
+| Own storage | SQLite | Only for data the harness does not keep: usage events, backlog items, notes, the marketplace catalog, and the project list. |
 | Usage statistics | A harness hook | `harness-hanger hook record` is installed as a Claude Code hook and writes events to SQLite. Statistics start from the moment the hook is installed. There is no import of old transcripts. Skills, subagents, slash commands, and MCP tools are all tracked from the start, and each event records whether the agent or a human started the component (decided on 2026-10-15, AIM-8). |
 | "Planning" | A backlog of components | Not a declarative plan/apply model. A manifest and lock file may come later as an option. |
+| Marketplace catalog | harness-hanger's own list, separate from Claude Code | Decided on 2026-10-15, so that you can look into a marketplace without registering it with Claude Code. Adding one does not change Claude Code's files. GitHub sources are shallow-cloned with the system `git` into the harness-hanger data directory. Local clones are read in place. Installing a plugin into Claude Code is a later step. |
 | Applying a collection | A one-time copy into the project | Decided on 2026-10-15 (AIM-7). The project does not stay linked to the collection, so a later change to the collection does not change the project. |
 | Tester output | An embedded terminal | Decided on 2026-10-15 (AIM-9). A PTY in the Rust core and xterm.js in the window. It works the same for every agent. A structured view of messages and tool calls is not planned yet. |
 | Workflow sessions | A setting on each workflow | Decided on 2026-10-15 (AIM-10). The user chooses between one shared agent session for all steps and a new session for each step. A new session for each step is the default. |
@@ -94,7 +96,7 @@ Features are tracked as issues in Linear, in the Harness Hanger project (team `A
 | M2: Usage statistics | `hook record`, `hook install` and `hook uninstall`, the SQLite schema, a stats CLI, and a stats view. Covers skills, subagents, slash commands, and MCP tools, with an agent vs. human split. | AIM-8 |
 | M3: Project scope management | Add any folder as a project and see the harness it uses (read-only). Then add, remove, enable, and disable components per project. Safe writes to settings files. | AIM-6 |
 | M4: Global dashboard and backlog | Edit user-level components. Backlog CRUD. | |
-| M5: Marketplaces | List known marketplaces, browse their plugins, and install and update them in Claude Code, Cursor, Hermes, Codex, and pi, globally or for one project. | AIM-5 |
+| M5: Marketplaces | Started: the catalog (add from GitHub or a local clone, list, remove) and a preview of each marketplace's plugins, skills, agents, and commands. Remaining: update clones, show hooks and MCP servers, and install into Claude Code, Cursor, Hermes, Codex, and pi, globally or for one project. | AIM-5 |
 | M6: Collections | Named sets of components. Apply to a project as a one-time copy. Export to a file and import with a preview. | AIM-7 |
 | M7: Tester | A Test tab on skill and subagent pages: folder, agent, and prompt, run in an embedded terminal, and a check that the component was used. | AIM-9 |
 | M8: Workflows | Ordered steps that use skills, agents, and plugins. Run with one call, share as a file. Shared or per-step agent sessions. | AIM-10 |

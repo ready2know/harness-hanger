@@ -48,7 +48,11 @@ docs/
 pnpm install                          # JS dependencies and git hooks
 pnpm dev                              # run the desktop app
 cargo run -p hanger-cli -- info       # run the CLI
+cargo run -p hanger-cli -- marketplace add owner/repo   # add a marketplace to the catalog
 ```
+
+The CLI and the desktop app keep their data in one directory: `harness-hanger` in the platform's
+local data directory, or `$HARNESS_HANGER_DATA_DIR` when it is set.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, checks, and the commit convention.
 

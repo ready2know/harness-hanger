@@ -1,8 +1,42 @@
 use hanger_core::AppInfo;
+use hanger_core::marketplace::{
+    Catalog, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
+};
 
 #[tauri::command]
 fn app_info() -> AppInfo {
     AppInfo::collect()
+}
+
+#[tauri::command]
+async fn list_marketplaces() -> Result<Vec<MarketplaceSummary>, String> {
+    with_catalog(Catalog::list).await
+}
+
+/// `source` is what the person typed: a GitHub URL, `owner/repo`, or a local directory path.
+#[tauri::command]
+async fn add_marketplace(source: String) -> Result<MarketplaceSummary, String> {
+    with_catalog(move |catalog| catalog.add(&MarketplaceSource::parse(&source)?)).await
+}
+
+#[tauri::command]
+async fn marketplace_details(id: i64) -> Result<MarketplaceDetails, String> {
+    with_catalog(move |catalog| catalog.details(id)).await
+}
+
+#[tauri::command]
+async fn remove_marketplace(id: i64) -> Result<(), String> {
+    with_catalog(move |catalog| catalog.remove(id)).await
+}
+
+/// Runs catalog work, which reads files and may run git, on a blocking thread.
+async fn with_catalog<T: Send + 'static>(
+    work: impl FnOnce(&Catalog) -> hanger_core::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || work(&Catalog::open_default()?))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// Starts the desktop app.
@@ -13,6 +47,7 @@ fn app_info() -> AppInfo {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -23,7 +58,13 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_info])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            list_marketplaces,
+            add_marketplace,
+            marketplace_details,
+            remove_marketplace,
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run the harness-hanger desktop app");
 }

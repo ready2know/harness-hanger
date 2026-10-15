@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { getAppInfo } from '@/lib/api'
+import { getAppInfo, getMarketplaceDetails, listMarketplaces } from '@/lib/api'
 import { routes } from '@/router'
 import App from '../App.vue'
 
-vi.mock('@/lib/api', () => ({ getAppInfo: vi.fn<typeof getAppInfo>() }))
+vi.mock('@/lib/api', () => ({
+  getAppInfo: vi.fn<typeof getAppInfo>(),
+  listMarketplaces: vi.fn<typeof listMarketplaces>(),
+  // Never settles: these tests only look at the layout around the page.
+  getMarketplaceDetails: vi.fn<typeof getMarketplaceDetails>(() => new Promise(() => {})),
+}))
 
 enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   localStorage.clear()
   vi.mocked(getAppInfo).mockResolvedValue({ version: '1.2.3', claudeConfigDir: null })
+  vi.mocked(listMarketplaces).mockResolvedValue([])
 })
 
 async function mountAt(path: string) {
@@ -47,6 +53,13 @@ describe('App sidebar', () => {
     const active = wrapper.findAll('[data-sidebar="menu-button"][data-active]')
     expect(active.map((button) => button.text())).toEqual(['Skills'])
     expect(wrapper.get('h1').text()).toBe('Skills')
+  })
+
+  it('keeps a section active on the pages below it', async () => {
+    const wrapper = await mountAt('/marketplace/3')
+
+    const active = wrapper.findAll('[data-sidebar="menu-button"][data-active]')
+    expect(active.map((button) => button.text())).toEqual(['Marketplace'])
   })
 
   it('collapses to icons with the toggle button and remembers it', async () => {

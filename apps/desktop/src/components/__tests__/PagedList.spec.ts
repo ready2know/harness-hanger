@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { h } from 'vue'
 
+import type { PageSizeSetting } from '@/lib/pageSizes'
 import PagedList from '../PagedList.vue'
 
 enableAutoUnmount(afterEach)
@@ -15,9 +16,9 @@ beforeEach(() => localStorage.clear())
 
 const numbers = (count: number) => Array.from({ length: count }, (_, index) => index + 1)
 
-function mountList(items: number[]) {
+function mountList(items: number[], setting?: PageSizeSetting) {
   return mount(PagedList<number>, {
-    props: { items },
+    props: { items, setting },
     slots: {
       default: ({ items: shown }: { items: number[] }) =>
         h(
@@ -69,7 +70,7 @@ describe('PagedList', () => {
     expect(range(wrapper)).toBe('11–20 of 60')
   })
 
-  it('offers 10, 25, 50, 100, and all items per page, and remembers the choice', async () => {
+  it('offers 5, 10, 25, 50, 100, and all items per page, and remembers the choice', async () => {
     const wrapper = mountList(numbers(60))
 
     await choosePageSize(wrapper, '50')
@@ -110,15 +111,37 @@ describe('PagedList', () => {
   })
 
   it('has no controls for a list that fits on the smallest page', () => {
-    const wrapper = mountList(numbers(10))
+    const wrapper = mountList(numbers(5))
 
-    expect(shown(wrapper)).toEqual(numbers(10))
+    expect(shown(wrapper)).toEqual(numbers(5))
     expect(wrapper.find('[data-slot="select-trigger"]').exists()).toBe(false)
+  })
+
+  it('has controls for a list longer than the smallest page, so that it can be split', async () => {
+    const wrapper = mountList(numbers(8))
+    expect(range(wrapper)).toBe('1–8 of 8')
+
+    await choosePageSize(wrapper, '5')
+
+    expect(shown(wrapper)).toEqual(numbers(5))
+    expect(range(wrapper)).toBe('1–5 of 8')
   })
 
   it('ignores a page size that it does not offer', () => {
     localStorage.setItem('list-page-size', '7')
 
+    expect(mountList(numbers(60)).findAll('li')).toHaveLength(10)
+  })
+
+  it('keeps the page size of lists with their own setting apart', async () => {
+    const setting: PageSizeSetting = { key: 'other-page-size', initial: '5' }
+    const wrapper = mountList(numbers(60), setting)
+    expect(range(wrapper)).toBe('1–5 of 60')
+
+    await choosePageSize(wrapper, '25')
+
+    expect(localStorage.getItem('other-page-size')).toBe('25')
+    expect(localStorage.getItem('list-page-size')).toBeNull()
     expect(mountList(numbers(60)).findAll('li')).toHaveLength(10)
   })
 })

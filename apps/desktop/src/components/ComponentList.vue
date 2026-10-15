@@ -4,18 +4,21 @@ import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import PagedList from '@/components/PagedList.vue'
 import { Badge } from '@/components/ui/badge'
 import type { Component } from '@/lib/api'
+import type { PageSizeSetting } from '@/lib/pageSizes'
 
 defineProps<{
   /** `plugin` is shown as a badge. `to` is the component's page, when it has one. */
   items: { component: Component; plugin?: string; to?: RouteLocationRaw }[]
   /** Shown when there are no items. */
   empty: string
+  /** Which page size the list shares with others. The catalog's, unless given. */
+  pageSize?: PageSizeSetting
 }>()
 </script>
 
 <template>
   <p v-if="items.length === 0" class="text-muted-foreground py-6 text-center">{{ empty }}</p>
-  <PagedList v-else v-slot="{ items: visible }" :items="items">
+  <PagedList v-else v-slot="{ items: visible }" :items="items" :setting="pageSize">
     <ul class="divide-y rounded-xl border">
       <li
         v-for="({ component, plugin, to }, index) in visible"

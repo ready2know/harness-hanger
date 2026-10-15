@@ -17,21 +17,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { catalogPageSize, pageSizes, type PageSize, type PageSizeSetting } from '@/lib/pageSizes'
 
 /**
  * Shows `items` one page at a time, with controls below to turn pages and to pick the page size.
  * To start again at the first page, for example when a search changes, give it a new `key`.
+ * Lists that share a `setting` share the page size, which is kept across launches.
  */
-const props = defineProps<{ items: T[] }>()
+const props = withDefaults(defineProps<{ items: T[]; setting?: PageSizeSetting }>(), {
+  setting: () => catalogPageSize,
+})
 defineSlots<{ default(props: { items: T[] }): unknown }>()
 
-const pageSizes = ['10', '25', '50', '100', 'all'] as const
-type PageSize = (typeof pageSizes)[number]
-
-// One size for every list, kept across launches.
-const storedSize = useLocalStorage<string>('list-page-size', '10')
+const storedSize = useLocalStorage<string>(props.setting.key, props.setting.initial)
 const pageSize = computed<PageSize>({
-  get: () => pageSizes.find((size) => size === storedSize.value) ?? '10',
+  get: () => pageSizes.find((size) => size === storedSize.value) ?? props.setting.initial,
   set: (size) => (storedSize.value = size),
 })
 const perPage = computed(() =>

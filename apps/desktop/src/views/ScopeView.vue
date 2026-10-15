@@ -37,6 +37,7 @@ import {
   type ScopeState,
 } from '@/lib/api'
 import { count, relativePath } from '@/lib/format'
+import { scopePageSize } from '@/lib/pageSizes'
 import { useProjectsStore } from '@/stores/projects'
 
 /** `null` for the global setup. */
@@ -235,58 +236,61 @@ const standaloneItems = computed(() => {
         <p v-if="state.plugins.length === 0" class="text-muted-foreground text-sm">
           No plugins are installed {{ projectId === null ? 'for your user' : 'here' }}.
         </p>
-        <ul v-else class="divide-y rounded-xl border">
-          <li
-            v-for="plugin in state.plugins"
-            :key="plugin.id"
-            class="flex items-start gap-3 px-4 py-3"
-          >
-            <div class="flex min-w-0 flex-1 flex-col gap-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium">{{ plugin.name }}</span>
-                <span class="text-muted-foreground text-xs">@{{ plugin.marketplace }}</span>
-                <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
-                <Badge v-if="projectId !== null" variant="outline">
-                  {{ scopeLabels[plugin.installedIn] }}
-                </Badge>
+        <PagedList
+          v-else
+          v-slot="{ items: visible }"
+          :items="state.plugins"
+          :setting="scopePageSize"
+        >
+          <ul class="divide-y rounded-xl border">
+            <li v-for="plugin in visible" :key="plugin.id" class="flex items-start gap-3 px-4 py-3">
+              <div class="flex min-w-0 flex-1 flex-col gap-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-medium">{{ plugin.name }}</span>
+                  <span class="text-muted-foreground text-xs">@{{ plugin.marketplace }}</span>
+                  <Badge v-if="plugin.version" variant="secondary">{{ plugin.version }}</Badge>
+                  <Badge v-if="projectId !== null" variant="outline">
+                    {{ scopeLabels[plugin.installedIn] }}
+                  </Badge>
+                </div>
+                <p v-if="plugin.description" class="text-muted-foreground line-clamp-2 text-sm">
+                  {{ plugin.description }}
+                </p>
+                <p class="text-muted-foreground text-xs">{{ explain(plugin) }}</p>
+                <p v-if="rowErrors[keyOf(plugin.id)]" role="alert" class="text-destructive text-xs">
+                  {{ rowErrors[keyOf(plugin.id)] }}
+                </p>
               </div>
-              <p v-if="plugin.description" class="text-muted-foreground line-clamp-2 text-sm">
-                {{ plugin.description }}
-              </p>
-              <p class="text-muted-foreground text-xs">{{ explain(plugin) }}</p>
-              <p v-if="rowErrors[keyOf(plugin.id)]" role="alert" class="text-destructive text-xs">
-                {{ rowErrors[keyOf(plugin.id)] }}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <LoaderCircleIcon
-                v-if="busy[keyOf(plugin.id)]"
-                class="text-muted-foreground size-4 animate-spin"
-                aria-label="Changing"
-              />
-              <Button
-                v-if="projectId !== null && plugin.installedIn !== 'user'"
-                variant="ghost"
-                size="icon-sm"
-                :aria-label="`Uninstall ${plugin.name}`"
-                :disabled="busy[keyOf(plugin.id)]"
-                @click="confirming = plugin"
-              >
-                <TrashIcon />
-              </Button>
-              <Switch
-                :model-value="plugin.enabled"
-                :disabled="busy[keyOf(plugin.id)]"
-                :aria-label="
-                  projectId === null
-                    ? `${plugin.name} on for your user`
-                    : `${plugin.name} on in this project`
-                "
-                @update:model-value="toggle(plugin, $event)"
-              />
-            </div>
-          </li>
-        </ul>
+              <div class="flex shrink-0 items-center gap-2">
+                <LoaderCircleIcon
+                  v-if="busy[keyOf(plugin.id)]"
+                  class="text-muted-foreground size-4 animate-spin"
+                  aria-label="Changing"
+                />
+                <Button
+                  v-if="projectId !== null && plugin.installedIn !== 'user'"
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="`Uninstall ${plugin.name}`"
+                  :disabled="busy[keyOf(plugin.id)]"
+                  @click="confirming = plugin"
+                >
+                  <TrashIcon />
+                </Button>
+                <Switch
+                  :model-value="plugin.enabled"
+                  :disabled="busy[keyOf(plugin.id)]"
+                  :aria-label="
+                    projectId === null
+                      ? `${plugin.name} on for your user`
+                      : `${plugin.name} on in this project`
+                  "
+                  @update:model-value="toggle(plugin, $event)"
+                />
+              </div>
+            </li>
+          </ul>
+        </PagedList>
       </section>
 
       <section
@@ -324,7 +328,13 @@ const standaloneItems = computed(() => {
         <p v-else-if="candidates.length === 0" class="text-muted-foreground text-sm">
           {{ installQuery ? 'No plugins match.' : 'Nothing to install: add a marketplace first.' }}
         </p>
-        <PagedList v-else :key="installQuery" v-slot="{ items: visible }" :items="candidates">
+        <PagedList
+          v-else
+          :key="installQuery"
+          v-slot="{ items: visible }"
+          :items="candidates"
+          :setting="scopePageSize"
+        >
           <ul class="divide-y rounded-xl border">
             <li
               v-for="entry in visible"
@@ -378,7 +388,7 @@ const standaloneItems = computed(() => {
             {{ projectId === null ? 'for your user' : 'in this project' }}.
           </p>
         </div>
-        <ComponentList :items="standaloneItems" empty="None." />
+        <ComponentList :items="standaloneItems" empty="None." :page-size="scopePageSize" />
         <details v-if="state.warnings.length" class="rounded-xl border px-4 py-3">
           <summary class="flex cursor-pointer items-center gap-2 text-sm font-medium">
             <TriangleAlertIcon class="size-4 text-amber-500" />

@@ -5,7 +5,12 @@ mod manifest;
 mod scan;
 mod source;
 
-pub use catalog::{Catalog, CatalogPlugin, CatalogPlugins, MarketplaceDetails, MarketplaceSummary};
+pub use catalog::{
+    Catalog, CatalogPlugin, CatalogPlugins, ComponentDetails, ComponentFile, MarketplaceDetails,
+    MarketplaceSummary, PluginDetails,
+};
 pub(crate) use scan::standalone;
-pub use scan::{Component, MarketplacePreview, PluginPreview, PluginSource, ScanWarning, preview};
+pub use scan::{
+    Component, ComponentKind, MarketplacePreview, PluginPreview, PluginSource, ScanWarning, preview,
+};
 pub use source::MarketplaceSource;

@@ -4,7 +4,7 @@
   "owner": { "name": "Fixture Owner", "email": "owner@example.com" },
   "metadata": { "description": "A marketplace for tests.", "pluginRoot": "./plugins" },
   "plugins": [
-    { "name": "standard", "source": "./plugins/standard", "description": "Uses the default layout.", "version": "0.0.1", "category": "development" },
+    { "name": "standard", "source": "./plugins/standard", "description": "Uses the default layout.", "version": "0.0.1", "category": "development", "tags": ["quality", "ci"], "homepage": "https://example.com/standard", "license": 42 },
     { "name": "bare", "source": "bare" },
     {
       "name": "custom",

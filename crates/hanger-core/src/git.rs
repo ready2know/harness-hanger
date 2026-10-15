@@ -56,6 +56,22 @@ pub(crate) fn set_origin(repo: &Path, url: &str) -> Result<()> {
     ))
 }
 
+/// The commit that `repo` has checked out.
+pub(crate) fn head(repo: &Path) -> Result<String> {
+    let output = git()
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|source| Error::Git(format!("cannot run git: {source}")))?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    }
+    Err(Error::Git(
+        String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    ))
+}
+
 /// Explains the failure that git reports when a server asks for credentials that are not there.
 ///
 /// GitHub asks for them both for a missing repository and for a private one.

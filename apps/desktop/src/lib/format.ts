@@ -64,3 +64,43 @@ export function projectLabels(projects: Project[]): Map<number, string> {
     }),
   )
 }
+
+/** Frontmatter keys that hold labels, which a page shows as tags. */
+const TAG_KEYS = ['tags', 'keywords']
+
+/** The labels in a component's frontmatter: a list, or text separated by commas. */
+export function frontmatterTags(frontmatter: Record<string, unknown>): string[] {
+  return TAG_KEYS.flatMap((key) => {
+    const value = frontmatter[key]
+    const items = typeof value === 'string' ? value.split(',') : Array.isArray(value) ? value : []
+    return items
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim())
+  })
+}
+
+export type FrontmatterField =
+  | { key: string; kind: 'text'; text: string }
+  | { key: string; kind: 'list'; items: string[] }
+  /** A value with structure, as JSON. */
+  | { key: string; kind: 'json'; json: string }
+
+/**
+ * The frontmatter fields to list, without those that a page shows elsewhere: the name, the
+ * description, and the tags.
+ */
+export function frontmatterFields(frontmatter: Record<string, unknown>): FrontmatterField[] {
+  return Object.entries(frontmatter)
+    .filter(([key]) => !['name', 'description', ...TAG_KEYS].includes(key))
+    .map(([key, value]): FrontmatterField => {
+      if (Array.isArray(value) && value.every(isScalar)) {
+        return { key, kind: 'list', items: value.map(String) }
+      }
+      if (isScalar(value)) return { key, kind: 'text', text: String(value) }
+      return { key, kind: 'json', json: JSON.stringify(value, null, 2) }
+    })
+}
+
+function isScalar(value: unknown): value is string | number | boolean {
+  return ['string', 'number', 'boolean'].includes(typeof value)
+}

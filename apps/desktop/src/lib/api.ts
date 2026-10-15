@@ -50,6 +50,12 @@ export interface PluginPreview {
   version: string | null
   author: string | null
   category: string | null
+  /** The manifest's `keywords` and the marketplace entry's `tags`. */
+  keywords: string[]
+  homepage: string | null
+  /** The plugin's own repository, which can differ from the marketplace's. */
+  repository: string | null
+  license: string | null
   source: PluginSource
   skills: Component[]
   agents: Component[]
@@ -113,6 +119,61 @@ export interface CatalogPlugins {
 /** Every plugin in the catalog's marketplaces, with its status in Claude Code. */
 export function listCatalogPlugins(): Promise<CatalogPlugins> {
   return invoke<CatalogPlugins>('list_catalog_plugins')
+}
+
+/** Mirrors `hanger_core::marketplace::PluginDetails`. */
+export interface PluginDetails {
+  marketplace: MarketplaceSummary
+  status: PluginStatus
+  plugin: PluginPreview
+  /** The README in the plugin's directory, when there is one that can be read. */
+  readme: string | null
+  /** The plugin in a browser: its directory on GitHub, or the repository it is installed from. */
+  webUrl: string | null
+}
+
+/** `plugin` is its name in the catalog marketplace `marketplace`. */
+export function getPluginDetails(marketplace: number, plugin: string): Promise<PluginDetails> {
+  return invoke<PluginDetails>('plugin_details', { marketplace, plugin })
+}
+
+/** Mirrors `hanger_core::marketplace::ComponentKind`. */
+export type ComponentKind = 'skill' | 'agent' | 'command'
+
+/** Mirrors `hanger_core::marketplace::ComponentFile`. */
+export interface ComponentFile {
+  /** The whole file. */
+  text: string
+  /** The top-level frontmatter fields, as YAML reads them. */
+  frontmatter: Record<string, unknown>
+  /** The Markdown after the frontmatter. */
+  body: string
+}
+
+/** Mirrors `hanger_core::marketplace::ComponentDetails`. */
+export interface ComponentDetails {
+  marketplace: MarketplaceSummary
+  /** The status of the plugin that provides it. */
+  status: PluginStatus
+  plugin: PluginPreview
+  kind: ComponentKind
+  component: Component
+  /** `null` for a command written inline in a manifest, or when `fileError` is set. */
+  file: ComponentFile | null
+  /** Why the file cannot be read. */
+  fileError: string | null
+  /** The file on GitHub, for a marketplace cloned from there. */
+  webUrl: string | null
+}
+
+/** A skill, an agent, or a command of `plugin` in the catalog marketplace `marketplace`. */
+export function getComponentDetails(
+  marketplace: number,
+  plugin: string,
+  kind: ComponentKind,
+  name: string,
+): Promise<ComponentDetails> {
+  return invoke<ComponentDetails>('component_details', { marketplace, plugin, kind, name })
 }
 
 /** Mirrors `hanger_core::harness::FoundMarketplace`. */

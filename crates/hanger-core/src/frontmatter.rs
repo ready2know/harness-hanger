@@ -1,6 +1,7 @@
 //! YAML frontmatter at the top of skill, agent, and command files.
 
 use serde::Deserialize;
+use serde_json::{Map, Value};
 
 /// The frontmatter fields harness-hanger reads. Other keys are ignored.
 #[derive(Debug, Default, Deserialize)]
@@ -33,7 +34,7 @@ impl Document<'_> {
 /// Frontmatter that is not valid YAML is read line by line, because Claude Code accepts it too.
 /// Published plugins rely on that, for example with an unquoted `: ` inside a description.
 pub(crate) fn parse(text: &str) -> Document<'_> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let text = without_bom(text);
     let Some((yaml, body)) = split(text) else {
         return Document {
             frontmatter: Frontmatter::default(),
@@ -48,16 +49,31 @@ pub(crate) fn parse(text: &str) -> Document<'_> {
     Document { frontmatter, body }
 }
 
+/// Every top-level frontmatter field, for display. Frontmatter that is not valid YAML gives the
+/// fields that [`parse`] reads from it line by line, as text.
+pub(crate) fn fields(text: &str) -> Map<String, Value> {
+    let Some((yaml, _)) = split(without_bom(text)) else {
+        return Map::new();
+    };
+    if yaml.trim().is_empty() {
+        return Map::new();
+    }
+    serde_saphyr::from_str(yaml).unwrap_or_else(|_| {
+        lines(yaml)
+            .filter_map(|(key, value)| Some((key.to_owned(), Value::String(value?.to_owned()))))
+            .collect()
+    })
+}
+
+fn without_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// Reads top-level `key: value` lines, skipping values that YAML would not read as plain text.
 fn read_lines(yaml: &str) -> Frontmatter {
     let mut frontmatter = Frontmatter::default();
-    for line in yaml.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        let plain = !value.is_empty() && !value.starts_with(['[', '{', '|', '>', '&', '*']);
-        let value = plain.then(|| unquote(value).to_owned());
+    for (key, value) in lines(yaml) {
+        let value = value.map(str::to_owned);
         match key {
             "name" => frontmatter.name = value,
             "description" => frontmatter.description = value,
@@ -65,6 +81,16 @@ fn read_lines(yaml: &str) -> Frontmatter {
         }
     }
     frontmatter
+}
+
+/// Each `key: value` line, with `None` for a value that YAML would not read as plain text.
+fn lines(yaml: &str) -> impl Iterator<Item = (&str, Option<&str>)> {
+    yaml.lines().filter_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        let value = value.trim();
+        let plain = !value.is_empty() && !value.starts_with(['[', '{', '|', '>', '&', '*']);
+        Some((key, plain.then(|| unquote(value))))
+    })
 }
 
 fn unquote(value: &str) -> &str {
@@ -152,6 +178,42 @@ mod tests {
             doc.description().as_deref(),
             Some("Use it when: errors are swallowed.")
         );
+    }
+
+    #[test]
+    fn lists_every_field() {
+        let fields = fields(
+            "---\nname: review\nallowed-tools: [Read, Grep]\nuser-invocable: false\nmetadata:\n  team: core\n---\nBody\n",
+        );
+        assert_eq!(
+            Value::Object(fields),
+            serde_json::json!({
+                "name": "review",
+                "allowed-tools": ["Read", "Grep"],
+                "user-invocable": false,
+                "metadata": { "team": "core" },
+            })
+        );
+    }
+
+    #[test]
+    fn lists_the_plain_fields_of_invalid_yaml() {
+        let fields = fields(
+            "---\nname: 'hunter'\ndescription: Use it when: errors are swallowed.\nargument-hint: [system] [--source <path>]\n---\n",
+        );
+        assert_eq!(
+            Value::Object(fields),
+            serde_json::json!({
+                "name": "hunter",
+                "description": "Use it when: errors are swallowed.",
+            })
+        );
+    }
+
+    #[test]
+    fn a_file_without_frontmatter_has_no_fields() {
+        assert!(fields("Just text\n").is_empty());
+        assert!(fields("---\n---\nBody\n").is_empty());
     }
 
     #[test]

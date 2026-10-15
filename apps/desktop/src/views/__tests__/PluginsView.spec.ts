@@ -1,28 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
 
 import { listCatalogPlugins } from '@/lib/api'
 import PluginsView from '../PluginsView.vue'
 import { catalogPlugins, movedMarketplace } from './catalogFixtures'
+import { stubRouter } from './stubRouter'
 
 vi.mock('@/lib/api', () => ({ listCatalogPlugins: vi.fn<typeof listCatalogPlugins>() }))
 
 enableAutoUnmount(afterEach)
 
 async function mountView() {
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      { path: '/', component: { render: () => null } },
-      { path: '/marketplace', name: 'marketplace', component: { render: () => null } },
-      {
-        path: '/marketplace/:id',
-        name: 'marketplace-preview',
-        component: { render: () => null },
-      },
-    ],
-  })
+  const router = stubRouter()
   const wrapper = mount(PluginsView, { global: { plugins: [router] } })
   await flushPromises()
   return wrapper
@@ -45,7 +34,10 @@ describe('PluginsView', () => {
     expect(review.text()).toContain('1.2.0')
     expect(review.text()).toContain('Enabled')
     expect(review.text()).toContain('2 skills · 1 agent')
-    expect(review.get('a').attributes('href')).toBe('/marketplace/1')
+    expect(review.findAll('a').map((link) => link.attributes('href'))).toEqual([
+      '/plugins/1/review',
+      '/marketplace/1',
+    ])
     expect(rows[2]!.text()).toContain('Installed from elsewhere; contents unknown')
     expect(wrapper.findAll('[data-slot="toggle-group-item"]').map((item) => item.text())).toEqual([
       'All 4',

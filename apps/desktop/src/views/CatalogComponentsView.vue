@@ -7,6 +7,7 @@ import CatalogFilters from '@/components/CatalogFilters.vue'
 import PluginStatusBadge from '@/components/PluginStatusBadge.vue'
 import UnreadableNotice from '@/components/UnreadableNotice.vue'
 import { useCatalogFilter, useCatalogPlugins } from '@/composables/useCatalogPlugins'
+import { componentRoute, pluginRoute } from '@/lib/routes'
 
 /** Skills and agents load through their plugin, so each one shows its plugin's status. */
 const props = defineProps<{ kind: 'skills' | 'agents' }>()
@@ -18,6 +19,12 @@ const rows = computed(() =>
     .flatMap((entry) =>
       entry.plugin[props.kind].map((component) => ({
         component,
+        to: componentRoute(
+          props.kind === 'skills' ? 'skill' : 'agent',
+          entry.marketplaceId,
+          entry.plugin.name,
+          component.name,
+        ),
         plugin: entry.plugin.name,
         standalone: entry.plugin.source.kind === 'harness',
         marketplace: entry.marketplace,
@@ -73,25 +80,36 @@ const title = computed(() => (props.kind === 'skills' ? 'Skills' : 'Agents'))
         <li
           v-for="(row, index) in shown"
           :key="`${index}/${row.marketplaceId}/${row.plugin}/${row.component.name}`"
-          class="flex flex-col gap-1 px-4 py-3"
+          class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
         >
           <div class="flex items-center justify-between gap-3">
-            <span
-              class="truncate font-mono text-sm font-medium"
+            <!-- The link covers the whole row; the links and badge below sit above it. -->
+            <RouterLink
+              :to="row.to"
+              class="truncate font-mono text-sm font-medium after:absolute after:inset-0"
               :title="row.component.path ?? undefined"
             >
               {{ row.component.name }}
-            </span>
-            <PluginStatusBadge :status="row.status" />
+            </RouterLink>
+            <PluginStatusBadge :status="row.status" class="relative" />
           </div>
           <p v-if="row.component.description" class="text-muted-foreground line-clamp-2">
             {{ row.component.description }}
           </p>
           <p class="text-muted-foreground text-xs">
-            {{ row.standalone ? 'Standalone in' : `${row.plugin} ·` }}
+            {{ row.standalone ? 'Standalone in' : '' }}
+            <template v-if="!row.standalone">
+              <RouterLink
+                :to="pluginRoute(row.marketplaceId, row.plugin)"
+                class="hover:text-foreground relative underline-offset-4 hover:underline"
+              >
+                {{ row.plugin }}
+              </RouterLink>
+              ·
+            </template>
             <RouterLink
               :to="{ name: 'marketplace-preview', params: { id: row.marketplaceId } }"
-              class="hover:text-foreground underline-offset-4 hover:underline"
+              class="hover:text-foreground relative underline-offset-4 hover:underline"
             >
               {{ row.marketplace }}
             </RouterLink>

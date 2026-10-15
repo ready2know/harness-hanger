@@ -9,6 +9,7 @@ import UnreadableNotice from '@/components/UnreadableNotice.vue'
 import { Badge } from '@/components/ui/badge'
 import { useCatalogFilter, useCatalogPlugins } from '@/composables/useCatalogPlugins'
 import { pluginContents } from '@/lib/format'
+import { pluginRoute } from '@/lib/routes'
 
 const { plugins, unreadable, error } = useCatalogPlugins()
 
@@ -26,6 +27,7 @@ const { query, status, counts, shown } = useCatalogFilter(rows, (entry) => [
   entry.plugin.name,
   entry.plugin.description,
   entry.plugin.category,
+  ...entry.plugin.keywords,
   entry.marketplace,
 ])
 </script>
@@ -56,16 +58,22 @@ const { query, status, counts, shown } = useCatalogFilter(rows, (entry) => [
         <li
           v-for="(entry, index) in shown"
           :key="`${index}/${entry.marketplaceId}/${entry.plugin.name}`"
-          class="flex flex-col gap-1 px-4 py-3"
+          class="hover:bg-muted/50 relative flex flex-col gap-1 px-4 py-3"
         >
           <div class="flex items-center justify-between gap-3">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
-              <span class="font-medium">{{ entry.plugin.name }}</span>
+              <!-- The link covers the whole row; the link and badge below sit above it. -->
+              <RouterLink
+                :to="pluginRoute(entry.marketplaceId, entry.plugin.name)"
+                class="font-medium after:absolute after:inset-0"
+              >
+                {{ entry.plugin.name }}
+              </RouterLink>
               <Badge v-if="entry.plugin.version" variant="secondary">
                 {{ entry.plugin.version }}
               </Badge>
             </div>
-            <PluginStatusBadge :status="entry.status" />
+            <PluginStatusBadge :status="entry.status" class="relative" />
           </div>
           <p v-if="entry.plugin.description" class="text-muted-foreground line-clamp-2">
             {{ entry.plugin.description }}
@@ -73,7 +81,7 @@ const { query, status, counts, shown } = useCatalogFilter(rows, (entry) => [
           <p class="text-muted-foreground text-xs">
             <RouterLink
               :to="{ name: 'marketplace-preview', params: { id: entry.marketplaceId } }"
-              class="hover:text-foreground underline-offset-4 hover:underline"
+              class="hover:text-foreground relative underline-offset-4 hover:underline"
             >
               {{ entry.marketplace }}
             </RouterLink>

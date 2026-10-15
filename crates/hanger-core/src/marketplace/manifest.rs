@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 /// `.claude-plugin/marketplace.json` at the marketplace root.
 #[derive(Debug, Deserialize)]
@@ -72,6 +73,8 @@ pub(crate) struct PluginEntry {
     pub strict: Option<bool>,
     #[serde(flatten)]
     pub components: ComponentPaths,
+    #[serde(flatten)]
+    pub links: Links,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,6 +103,65 @@ pub(crate) struct PluginManifest {
     pub author: Option<Person>,
     #[serde(flatten)]
     pub components: ComponentPaths,
+    #[serde(flatten)]
+    pub links: Links,
+}
+
+/// Fields that a plugin's page shows, in `plugin.json` and in a marketplace entry.
+///
+/// They are read leniently: a value of an unexpected type is ignored, because Claude Code does not
+/// need these fields to load the plugin, and a strict type would hide the whole plugin.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct Links {
+    homepage: Option<Value>,
+    repository: Option<Value>,
+    license: Option<Value>,
+    keywords: Option<Value>,
+    /// Marketplace entries only.
+    tags: Option<Value>,
+}
+
+impl Links {
+    pub fn homepage(&self) -> Option<String> {
+        url(self.homepage.as_ref())
+    }
+
+    /// A URL, or the `url` of an npm-style `{ "type": "git", "url": … }` object.
+    pub fn repository(&self) -> Option<String> {
+        url(self.repository.as_ref())
+    }
+
+    pub fn license(&self) -> Option<String> {
+        text(self.license.as_ref())
+    }
+
+    /// `keywords`, then `tags`.
+    pub fn keywords(&self) -> Vec<String> {
+        [&self.keywords, &self.tags]
+            .into_iter()
+            .flat_map(|value| match value {
+                Some(Value::Array(items)) => {
+                    items.iter().filter_map(|item| text(Some(item))).collect()
+                }
+                value => Vec::from_iter(text(value.as_ref())),
+            })
+            .collect()
+    }
+}
+
+fn text(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+}
+
+fn url(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::Object(object)) => text(object.get("url")),
+        value => text(value),
+    }
 }
 
 /// Component locations that a manifest or a marketplace entry can declare.

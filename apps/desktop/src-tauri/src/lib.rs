@@ -1,7 +1,8 @@
 use hanger_core::harness::claude_code::{ClaudeCode, ScopeState, UserPlugins};
 use hanger_core::harness::{Discovery, ImportItem};
 use hanger_core::marketplace::{
-    Catalog, CatalogPlugins, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
+    Catalog, CatalogPlugins, ComponentDetails, ComponentKind, MarketplaceDetails,
+    MarketplaceSource, MarketplaceSummary, PluginDetails,
 };
 use hanger_core::projects::{Project, Projects};
 use hanger_core::{AppInfo, paths};
@@ -31,6 +32,39 @@ async fn marketplace_details(id: i64) -> Result<MarketplaceDetails, String> {
 #[tauri::command]
 async fn list_catalog_plugins() -> Result<CatalogPlugins, String> {
     with_catalog(|catalog| catalog.plugins(&UserPlugins::read(&paths::claude_config_dir()?)?)).await
+}
+
+/// A plugin of the marketplace `marketplace`, with its status in Claude Code and its README.
+#[tauri::command]
+async fn plugin_details(marketplace: i64, plugin: String) -> Result<PluginDetails, String> {
+    with_catalog(move |catalog| {
+        catalog.plugin_details(
+            marketplace,
+            &plugin,
+            &UserPlugins::read(&paths::claude_config_dir()?)?,
+        )
+    })
+    .await
+}
+
+/// A skill, an agent, or a command of a plugin, with the file that defines it.
+#[tauri::command]
+async fn component_details(
+    marketplace: i64,
+    plugin: String,
+    kind: ComponentKind,
+    name: String,
+) -> Result<ComponentDetails, String> {
+    with_catalog(move |catalog| {
+        catalog.component_details(
+            marketplace,
+            &plugin,
+            kind,
+            &name,
+            &UserPlugins::read(&paths::claude_config_dir()?)?,
+        )
+    })
+    .await
 }
 
 /// What the harnesses have that the catalog can import.
@@ -150,6 +184,7 @@ async fn blocking<T: Send + 'static>(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -166,6 +201,8 @@ pub fn run() {
             add_marketplace,
             marketplace_details,
             list_catalog_plugins,
+            plugin_details,
+            component_details,
             import_candidates,
             import_from_harness,
             list_projects,

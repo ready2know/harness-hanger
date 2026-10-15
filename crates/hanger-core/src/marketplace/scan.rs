@@ -8,10 +8,10 @@ use std::fs;
 use std::io;
 use std::path::{Component as PathPart, Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{
-    CommandSpec, ComponentPaths, MarketplaceManifest, PathList, PluginEntry, PluginManifest,
+    CommandSpec, ComponentPaths, Links, MarketplaceManifest, PathList, PluginEntry, PluginManifest,
     PluginSourceSpec, RemoteSource,
 };
 use crate::frontmatter;
@@ -42,10 +42,46 @@ pub struct PluginPreview {
     pub version: Option<String>,
     pub author: Option<String>,
     pub category: Option<String>,
+    /// The manifest's `keywords` and the marketplace entry's `tags`.
+    pub keywords: Vec<String>,
+    pub homepage: Option<String>,
+    /// The plugin's own repository, which can differ from the marketplace's.
+    pub repository: Option<String>,
+    pub license: Option<String>,
     pub source: PluginSource,
     pub skills: Vec<Component>,
     pub agents: Vec<Component>,
     pub commands: Vec<Component>,
+}
+
+impl PluginPreview {
+    #[must_use]
+    pub fn components(&self, kind: ComponentKind) -> &[Component] {
+        match kind {
+            ComponentKind::Skill => &self.skills,
+            ComponentKind::Agent => &self.agents,
+            ComponentKind::Command => &self.commands,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ComponentKind {
+    Skill,
+    Agent,
+    Command,
+}
+
+impl ComponentKind {
+    #[must_use]
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Skill => "skill",
+            Self::Agent => "agent",
+            Self::Command => "command",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -65,7 +101,7 @@ pub enum PluginSource {
     Harness { harness: String },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Component {
     /// The name Claude Code uses, with subdirectories as namespaces, such as `db:migrate`.
@@ -98,6 +134,22 @@ pub(crate) fn read_manifest(root: &Path) -> Result<MarketplaceManifest> {
     serde_json::from_str(&text).map_err(|error| not_a_marketplace(format!("{MANIFEST}: {error}")))
 }
 
+/// Reads a file that a scan of `root` found, unless it links outside `root`, which the scan does not
+/// read either. `follow_links_out` allows that, as for the user's own directories.
+pub(crate) fn read_inside(root: &Path, path: &Path, follow_links_out: bool) -> Result<String> {
+    if !follow_links_out {
+        let real_root = fs::canonicalize(root).map_err(|source| Error::io(root, source))?;
+        let real = fs::canonicalize(path).map_err(|source| Error::io(path, source))?;
+        if !real.starts_with(&real_root) {
+            return Err(Error::io(
+                path,
+                io::Error::other("it links outside the marketplace, so it is not read"),
+            ));
+        }
+    }
+    fs::read_to_string(path).map_err(|source| Error::io(path, source))
+}
+
 /// The skills, agents, and commands that a harness loads for the user from `dir`, outside plugins,
 /// as a preview with one entry.
 ///
@@ -117,6 +169,10 @@ pub(crate) fn standalone(dir: &Path, harness: &str, name: &str) -> Result<Market
         version: None,
         author: None,
         category: None,
+        keywords: Vec::new(),
+        homepage: None,
+        repository: None,
+        license: None,
         source: PluginSource::Harness {
             harness: harness.to_owned(),
         },
@@ -188,6 +244,7 @@ struct Contents {
     description: Option<String>,
     version: Option<String>,
     author: Option<String>,
+    links: Links,
     skills: Vec<Component>,
     agents: Vec<Component>,
     commands: Vec<Component>,
@@ -211,6 +268,7 @@ impl Scan<'_> {
             source,
             strict,
             components,
+            links,
         } = entry;
         let (source, contents) = match source {
             PluginSourceSpec::Remote(remote) => (external(remote), Contents::default()),
@@ -243,6 +301,10 @@ impl Scan<'_> {
                 .map(|author| author.name().to_owned())
                 .or(contents.author),
             category,
+            keywords: unique([links.keywords(), contents.links.keywords()].concat()),
+            homepage: links.homepage().or_else(|| contents.links.homepage()),
+            repository: links.repository().or_else(|| contents.links.repository()),
+            license: links.license().or_else(|| contents.links.license()),
             source,
             skills: contents.skills,
             agents: contents.agents,
@@ -291,6 +353,7 @@ impl Scan<'_> {
             description: manifest.description,
             version: manifest.version,
             author: manifest.author.map(|author| author.name().to_owned()),
+            links: manifest.links,
             skills: self.skills(dir, declared.skills, skills_replace_default),
             agents: self.agents(dir, declared.agents),
             commands: self.commands(dir, declared.commands),
@@ -631,6 +694,15 @@ fn sort(components: &mut [Component]) {
     components.sort_by(|a, b| a.name.cmp(&b.name));
 }
 
+/// `items` without repeats, in their first order.
+fn unique(items: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,6 +778,17 @@ mod tests {
                 path: fixture().join("plugins/standard")
             }
         );
+        assert_eq!(standard.keywords, ["quality", "ci", "review"]);
+        assert_eq!(
+            standard.homepage.as_deref(),
+            Some("https://example.com/standard")
+        );
+        assert_eq!(
+            standard.repository.as_deref(),
+            Some("https://github.com/acme/standard")
+        );
+        // The entry's license is not text, so the manifest's is used.
+        assert_eq!(standard.license.as_deref(), Some("MIT"));
         assert_eq!(names(&standard.skills), ["alpha-skill", "beta"]);
         assert_eq!(
             descriptions(&standard.skills),

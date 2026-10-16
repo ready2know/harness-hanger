@@ -218,6 +218,13 @@ mod tests {
         let error =
             shallow_clone(missing.to_str().unwrap(), &tmp.path().join("clone")).unwrap_err();
 
-        assert!(matches!(&error, Error::Git(message) if message.contains("does not exist")));
+        // Git takes a path with a colon, such as one with a Windows drive letter, for a URL and
+        // words the failure differently.
+        assert!(
+            matches!(&error, Error::Git(message)
+                if message.contains("does not exist")
+                    || message.contains("does not appear to be a git repository")),
+            "{error:?}"
+        );
     }
 }

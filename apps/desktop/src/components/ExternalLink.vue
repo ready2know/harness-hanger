@@ -2,7 +2,10 @@
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed } from 'vue'
 
-/** A link from a manifest. Only a web address opens, in the browser; anything else is text. */
+/**
+ * A link from a manifest. Only a web address opens, in the browser; anything else is text. The
+ * default slot replaces the address as the link's text.
+ */
 const props = defineProps<{ href: string }>()
 
 const web = computed(() => /^https?:\/\//i.test(props.href))
@@ -15,7 +18,9 @@ const web = computed(() => /^https?:\/\//i.test(props.href))
     class="wrap-anywhere underline-offset-4 hover:underline"
     @click.prevent="openUrl(href)"
   >
-    {{ href }}
+    <slot>{{ href }}</slot>
   </a>
-  <span v-else class="wrap-anywhere">{{ href }}</span>
+  <span v-else class="wrap-anywhere"
+    ><slot>{{ href }}</slot></span
+  >
 </template>

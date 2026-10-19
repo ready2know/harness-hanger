@@ -4,6 +4,7 @@ import type { ComponentKind } from '@/lib/api'
 import CatalogComponentsView from '@/views/CatalogComponentsView.vue'
 import ComponentView from '@/views/ComponentView.vue'
 import DashboardView from '@/views/DashboardView.vue'
+import DiscoverView from '@/views/DiscoverView.vue'
 import MarketplacePreviewView from '@/views/MarketplacePreviewView.vue'
 import MarketplaceView from '@/views/MarketplaceView.vue'
 import PlaceholderView from '@/views/PlaceholderView.vue'
@@ -36,6 +37,7 @@ export const routes: RouteRecordRaw[] = [
     component: MarketplacePreviewView,
     props: (route) => ({ id: Number(route.params.id) }),
   },
+  { path: '/discover', name: 'discover', component: DiscoverView },
   { path: '/skills', name: 'skills', component: CatalogComponentsView, props: { kind: 'skills' } },
   componentPage('skill', 'skills'),
   { path: '/agents', name: 'agents', component: CatalogComponentsView, props: { kind: 'agents' } },

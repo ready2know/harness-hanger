@@ -4,13 +4,15 @@ import { open as openFolderPicker } from '@tauri-apps/plugin-dialog'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
-import { addProject, listProjects, removeProject, type Project } from '@/lib/api'
+import { addProject, getGitHubStatus, listProjects, removeProject, type Project } from '@/lib/api'
 import SettingsView from '../SettingsView.vue'
 
 vi.mock('@/lib/api', () => ({
   listProjects: vi.fn<typeof listProjects>(),
   addProject: vi.fn<typeof addProject>(),
   removeProject: vi.fn<typeof removeProject>(),
+  // GitHubSettings has tests of its own.
+  getGitHubStatus: vi.fn<typeof getGitHubStatus>(() => new Promise(() => {})),
 }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn<typeof openFolderPicker>() }))
 

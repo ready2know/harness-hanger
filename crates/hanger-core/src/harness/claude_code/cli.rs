@@ -315,33 +315,22 @@ fn outcome(output: &Output) -> Result<()> {
     }
 }
 
-/// Finds the `claude` command in `path` (the value of `PATH`) and the usual install locations,
-/// which a desktop app on macOS needs because it does not get the shell's `PATH`.
-///
-/// Only absolute directories count: a relative one would resolve against the project folder,
-/// which can come from anyone.
+/// Finds the `claude` command in `path` (the value of `PATH`) and where Claude Code installs it.
 fn find_claude(path: Option<OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
     let names: &[&str] = if cfg!(windows) {
         &["claude.exe", "claude.cmd"]
     } else {
         &["claude"]
     };
-    let mut dirs: Vec<PathBuf> = path
-        .map(|path| env::split_paths(&path).collect())
-        .unwrap_or_default();
-    if let Some(home) = home {
-        dirs.extend([
+    let extra = home.map_or_else(Vec::new, |home| {
+        vec![
             home.join(".local/bin"),
             home.join(".claude/local"),
             home.join(".npm-global/bin"),
             home.join(".bun/bin"),
-        ]);
-    }
-    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-    dirs.iter()
-        .filter(|dir| dir.is_absolute())
-        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
-        .find(|candidate| candidate.is_file())
+        ]
+    });
+    process::find(names, path, extra)
 }
 
 #[cfg(all(test, unix))]

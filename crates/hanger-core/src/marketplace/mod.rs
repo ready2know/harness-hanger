@@ -1,6 +1,7 @@
 //! Plugin marketplaces: the catalog of ones a person added, and a preview of what each contains.
 
 mod catalog;
+pub mod discover;
 mod manifest;
 mod scan;
 mod source;

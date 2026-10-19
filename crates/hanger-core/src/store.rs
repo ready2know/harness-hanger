@@ -26,6 +26,27 @@ const MIGRATIONS: &[&str] = &[
         path TEXT NOT NULL UNIQUE,
         added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
     )",
+    // What Discover found on GitHub: the local index of marketplaces, and the searches that
+    // found them. Both are a cache, which can be deleted at any time.
+    "CREATE TABLE discover_repo (
+        -- `owner/repo` in lowercase.
+        key TEXT PRIMARY KEY,
+        -- The repository and its plugins, as JSON.
+        data TEXT NOT NULL,
+        -- Unix seconds.
+        fetched_at INTEGER NOT NULL
+    );
+    CREATE TABLE discover_search (
+        method TEXT NOT NULL,
+        -- In lowercase, with single spaces.
+        query TEXT NOT NULL,
+        -- The keys of the repositories GitHub found, in its order, as a JSON array.
+        repos TEXT NOT NULL,
+        total_count INTEGER,
+        -- Unix seconds.
+        searched_at INTEGER NOT NULL,
+        PRIMARY KEY (method, query)
+    )",
 ];
 
 /// Opens the database in `data_dir`, creating it and applying pending migrations as needed.

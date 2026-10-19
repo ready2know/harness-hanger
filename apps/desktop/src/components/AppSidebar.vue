@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   BotIcon,
+  CompassIcon,
   FolderIcon,
   GlobeIcon,
   LayersIcon,
@@ -31,6 +32,7 @@ import { useProjectsStore } from '@/stores/projects'
 const dashboardItems: NavItem[] = [{ to: '/', title: 'Dashboard', icon: LayoutDashboardIcon }]
 const catalogItems: NavItem[] = [
   { to: '/marketplace', title: 'Marketplaces', icon: StoreIcon },
+  { to: '/discover', title: 'Discover', icon: CompassIcon },
   { to: '/skills', title: 'Skills', icon: SparklesIcon },
   { to: '/agents', title: 'Agents', icon: BotIcon },
   { to: '/plugins', title: 'Plugins', icon: PuzzleIcon },

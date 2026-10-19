@@ -6,9 +6,29 @@ import type {
   Project,
 } from '@/lib/api'
 
-/** `1 skill`, `3 skills`. */
+/** A date such as `Oct 16, 2026`, in the person's locale. */
+export function formatDate(timestamp: string): string {
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+/** A date and time such as `Oct 16, 2026, 3:05 PM`, in the person's locale. */
+export function formatDateTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+/** `1 skill`, `3 skills`, `1,234 skills`. */
 export function count(n: number, noun: string): string {
-  return `${n} ${n === 1 ? noun : `${noun}s`}`
+  return `${n.toLocaleString()} ${n === 1 ? noun : `${noun}s`}`
 }
 
 export const statusLabels: Record<PluginStatus, string> = {

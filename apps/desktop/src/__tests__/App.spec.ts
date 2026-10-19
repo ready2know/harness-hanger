@@ -56,7 +56,7 @@ describe('App sidebar', () => {
     const wrapper = await mountAt('/')
 
     const content = wrapper.get('[data-sidebar="content"]').text()
-    for (const title of ['Dashboard', 'Marketplaces', 'Skills', 'Agents', 'Plugins']) {
+    for (const title of ['Dashboard', 'Marketplaces', 'Discover', 'Skills', 'Agents', 'Plugins']) {
       expect(content).toContain(title)
     }
     expect(content).not.toContain('Settings')
@@ -70,7 +70,7 @@ describe('App sidebar', () => {
     const groups = content.findAll('[data-sidebar="group"]').map((group) => group.text())
     expect(groups).toEqual([
       'Dashboard',
-      'MarketplacesSkillsAgentsPlugins',
+      'MarketplacesDiscoverSkillsAgentsPlugins',
       'Collections All collectionsAdd collection',
       'Projects Globalmy-app',
     ])

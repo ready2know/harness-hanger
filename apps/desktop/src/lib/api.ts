@@ -302,6 +302,193 @@ export function uninstallPlugin(project: number, plugin: string): Promise<void> 
   return invoke<void>('uninstall_plugin', { project, plugin })
 }
 
+/** Mirrors `hanger_core::marketplace::discover::DiscoveredPlugin`: a plugin as a manifest lists it. */
+export interface DiscoveredPlugin {
+  name: string
+  description: string | null
+  version: string | null
+  category: string | null
+  /** The entry's `keywords` and `tags`. */
+  keywords: string[]
+}
+
+/** Mirrors `hanger_core::marketplace::discover::DiscoveredMarketplace`: a public marketplace on GitHub. */
+export interface DiscoveredMarketplace {
+  owner: string
+  repo: string
+  /** The repository on GitHub. */
+  url: string
+  /** The repository's description, else the manifest's. */
+  description: string | null
+  stars: number
+  /** The last push, as an RFC 3339 timestamp. */
+  pushedAt: string | null
+  /** An SPDX ID, such as `MIT`, or the license's name. */
+  license: string | null
+  archived: boolean
+  /** The marketplace's name in its manifest. */
+  name: string
+  pluginCount: number
+  plugins: DiscoveredPlugin[]
+  /** When GitHub was asked about it, as an RFC 3339 timestamp. */
+  fetchedAt: string
+  curated: boolean
+  /** Its ID in the catalog, when the catalog has it. */
+  catalogId: number | null
+  /** The plugins whose name, description, category, or keywords hold every word of the search. */
+  matchingPlugins: string[]
+  /** Other repositories with the same manifest name and plugins, as `owner/repo`, left out. */
+  copies: string[]
+}
+
+/** Mirrors `hanger_core::marketplace::discover::Problem`: why GitHub could not be asked. */
+export type DiscoverProblem =
+  | { kind: 'offline'; message: string }
+  /** `resetAt` is when the limit resets, as an RFC 3339 timestamp. */
+  | { kind: 'rateLimited'; resetAt: string | null }
+  | { kind: 'unauthorized'; message: string }
+  | { kind: 'github'; status: number; message: string }
+
+/** Mirrors `hanger_core::marketplace::discover::RateLimit`. */
+export interface RateLimit {
+  resource: string
+  limit: number
+  remaining: number
+  resetAt: string
+}
+
+/**
+ * Mirrors `hanger_core::marketplace::discover::SearchMethod`. `code` searches every manifest on
+ * GitHub and needs a token; `topic` searches repositories with the `claude-code-marketplace`
+ * topic, without one.
+ */
+export type SearchMethod = 'code' | 'topic' | 'curated'
+
+/** Mirrors `hanger_core::marketplace::discover::DiscoverResults`. */
+export interface DiscoverResults {
+  /** The search, or `null` for the curated list. */
+  query: string | null
+  method: SearchMethod
+  /** Whether GitHub is asked with a token. */
+  signedIn: boolean
+  /** The GitHub account that GitHub is asked as, when it is known without asking GitHub. */
+  account: string | null
+  /** The most starred first. */
+  results: DiscoveredMarketplace[]
+  /** How many repositories GitHub matched; it returns the first 50. */
+  totalCount: number | null
+  /** When GitHub was searched, as an RFC 3339 timestamp. */
+  searchedAt: string | null
+  /** Whether the GitHub results come from an earlier search instead of a new request. */
+  fromCache: boolean
+  /** Why GitHub could not be asked. The results then hold only what was found before. */
+  problem: DiscoverProblem | null
+  rateLimit: RateLimit | null
+}
+
+/**
+ * Public marketplaces on GitHub that match `query`, or the curated ones when it is empty. GitHub
+ * is asked unless the same search ran within the hour, or always with `refresh`.
+ */
+export function discoverMarketplaces(query: string, refresh = false): Promise<DiscoverResults> {
+  return invoke<DiscoverResults>('discover_marketplaces', { query, refresh })
+}
+
+/** Mirrors `hanger_core::github::TokenSource`: where the GitHub token in use comes from. */
+export type TokenSource =
+  /** `GH_TOKEN` or `GITHUB_TOKEN`, which wins over the others. */
+  | { kind: 'env'; variable: string }
+  /** Saved in the system keychain, by signing in or pasting a token. */
+  | { kind: 'saved' }
+  /** The login of the `gh` command. */
+  | { kind: 'gh' }
+
+/** Mirrors `hanger_core::github::GhStatus`. */
+export interface GhStatus {
+  signedIn: boolean
+  login: string | null
+}
+
+/** Mirrors `hanger_core::github::AccountStatus`: which GitHub account harness-hanger uses. */
+export interface AccountStatus {
+  /** `null` when there is no token. */
+  source: TokenSource | null
+  /** The account of the token in use, when harness-hanger knows it without asking GitHub. */
+  login: string | null
+  /** Whether a token is saved in the keychain, also when another one is in use. */
+  saved: boolean
+  savedLogin: string | null
+  /** `null` when the `gh` command is not installed. */
+  gh: GhStatus | null
+  /** Whether this build can sign in in the browser. */
+  browserSignIn: boolean
+  /** Why the system keychain cannot be read, if it cannot. */
+  keychainError: string | null
+}
+
+/** A code that the person enters at `verificationUri` to finish signing in. */
+export interface SignInPrompt {
+  userCode: string
+  verificationUri: string
+}
+
+/** Mirrors `hanger_core::github::DeviceCode`: a sign-in in the browser that has started. */
+export interface DeviceCode extends SignInPrompt {
+  /** What the sign-in is asked about with. Not for showing. */
+  deviceCode: string
+  /** Seconds until the code expires. */
+  expiresIn: number
+  /** Seconds to wait between two questions. */
+  interval: number
+}
+
+/** Mirrors `hanger_core::github::DevicePoll`. */
+export type DevicePoll =
+  { state: 'pending'; interval: number } | { state: 'done'; status: AccountStatus }
+
+/** Which GitHub account harness-hanger uses. Asks GitHub nothing. */
+export function getGitHubStatus(): Promise<AccountStatus> {
+  return invoke<AccountStatus>('github_status')
+}
+
+/** Checks `token` with GitHub and saves it in the system keychain. */
+export function saveGitHubToken(token: string): Promise<AccountStatus> {
+  return invoke<AccountStatus>('github_save_token', { token })
+}
+
+/** Forgets the saved token. One from the environment or from `gh` stays in use. */
+export function signOutOfGitHub(): Promise<AccountStatus> {
+  return invoke<AccountStatus>('github_sign_out')
+}
+
+/** Asks GitHub which account the token in use belongs to, and returns its login. */
+export function checkGitHubToken(): Promise<string> {
+  return invoke<string>('github_check')
+}
+
+export function startBrowserSignIn(): Promise<DeviceCode> {
+  return invoke<DeviceCode>('github_start_browser_sign_in')
+}
+
+/** Asks whether the person entered the code yet. The token is saved once they did. */
+export function pollBrowserSignIn(deviceCode: string, interval: number): Promise<DevicePoll> {
+  return invoke<DevicePoll>('github_poll_browser_sign_in', { deviceCode, interval })
+}
+
+/** Starts `gh auth login` in the browser, and returns the code that `gh` printed. */
+export function startGhSignIn(): Promise<SignInPrompt> {
+  return invoke<SignInPrompt>('github_start_gh_sign_in')
+}
+
+/** The account once `gh` finished signing in, or `null` while it waits. */
+export function pollGhSignIn(): Promise<AccountStatus | null> {
+  return invoke<AccountStatus | null>('github_poll_gh_sign_in')
+}
+
+export function cancelGhSignIn(): Promise<void> {
+  return invoke<void>('github_cancel_gh_sign_in')
+}
+
 export function removeMarketplace(id: number): Promise<void> {
   return invoke<void>('remove_marketplace', { id })
 }

@@ -48,6 +48,7 @@ function makeRouter() {
     routes: [
       { path: '/marketplace', name: 'marketplace', component: MarketplaceView },
       { path: '/marketplace/:id', name: 'marketplace-preview', component: { render: () => null } },
+      { path: '/discover', name: 'discover', component: { render: () => null } },
     ],
   })
 }
@@ -108,6 +109,7 @@ describe('MarketplaceView', () => {
     const { wrapper } = await mountView()
 
     expect(wrapper.text()).toContain('No marketplaces yet')
+    expect(wrapper.get('a[href="/discover"]').text()).toBe('Discover')
   })
 
   it('adds a marketplace and opens its preview', async () => {

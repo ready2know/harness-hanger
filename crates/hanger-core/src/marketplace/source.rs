@@ -102,7 +102,7 @@ const GITHUB_PREFIXES: &[&str] = &[
 ];
 
 /// Parses `owner/repo`, allowing a trailing `/` or `.git`.
-fn github(path: &str) -> Option<MarketplaceSource> {
+pub(crate) fn github(path: &str) -> Option<MarketplaceSource> {
     let path = path.trim_end_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let (owner, repo) = path.split_once('/')?;

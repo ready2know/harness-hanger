@@ -1,5 +1,9 @@
+use std::sync::{Mutex, PoisonError};
+
+use hanger_core::github::{Account, AccountStatus, DeviceCode, DevicePoll, GhSignIn, SignInPrompt};
 use hanger_core::harness::claude_code::{ClaudeCode, ScopeState, UserPlugins};
 use hanger_core::harness::{Discovery, ImportItem};
+use hanger_core::marketplace::discover::{Discover, DiscoverResults, Fetch};
 use hanger_core::marketplace::{
     Catalog, CatalogPlugins, ComponentDetails, ComponentKind, MarketplaceDetails,
     MarketplaceSource, MarketplaceSummary, PluginDetails,
@@ -161,6 +165,109 @@ fn project_path(project: Option<i64>) -> hanger_core::Result<Option<std::path::P
         .transpose()
 }
 
+/// Public marketplaces on GitHub that match `query`, or the curated ones when it is empty.
+/// GitHub is asked unless the same search ran within the hour, or always with `refresh`.
+#[tauri::command]
+async fn discover_marketplaces(query: String, refresh: bool) -> Result<DiscoverResults, String> {
+    let fetch = if refresh {
+        Fetch::Refresh
+    } else {
+        Fetch::WhenStale
+    };
+    blocking(move || Discover::open_default()?.search(&query, fetch)).await
+}
+
+/// The `gh auth login` that Settings started, while it runs.
+#[derive(Default)]
+struct GhSignInState(Mutex<Option<GhSignIn>>);
+
+/// Which GitHub account harness-hanger uses. Asks GitHub nothing.
+#[tauri::command]
+async fn github_status() -> Result<AccountStatus, String> {
+    blocking(|| Ok(Account::system().status())).await
+}
+
+/// Checks `token` with GitHub and saves it in the system keychain.
+#[tauri::command]
+async fn github_save_token(token: String) -> Result<AccountStatus, String> {
+    blocking(move || Account::system().save_token(&token)).await
+}
+
+/// Forgets the token saved in the system keychain.
+#[tauri::command]
+async fn github_sign_out() -> Result<AccountStatus, String> {
+    blocking(|| Account::system().sign_out()).await
+}
+
+/// Asks GitHub which account the token in use belongs to.
+#[tauri::command]
+async fn github_check() -> Result<String, String> {
+    blocking(|| Account::system().check()).await
+}
+
+#[tauri::command]
+async fn github_start_browser_sign_in() -> Result<DeviceCode, String> {
+    blocking(|| Account::system().start_browser_sign_in()).await
+}
+
+/// Asks whether the person entered the code yet; the token is saved once they did.
+#[tauri::command]
+async fn github_poll_browser_sign_in(
+    device_code: String,
+    interval: u64,
+) -> Result<DevicePoll, String> {
+    blocking(move || Account::system().poll_browser_sign_in(&device_code, interval)).await
+}
+
+/// Starts `gh auth login`, and returns the code to enter. A new sign-in stops the one before.
+#[tauri::command]
+async fn github_start_gh_sign_in(
+    state: tauri::State<'_, GhSignInState>,
+) -> Result<SignInPrompt, String> {
+    let sign_in = blocking(|| Account::system().start_gh_sign_in()).await?;
+    let prompt = sign_in.prompt();
+    *state.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(sign_in);
+    Ok(prompt)
+}
+
+/// The account once `gh` finished signing in, or `None` while it waits.
+#[tauri::command]
+async fn github_poll_gh_sign_in(
+    state: tauri::State<'_, GhSignInState>,
+) -> Result<Option<AccountStatus>, String> {
+    {
+        let mut running = state.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(sign_in) = running.as_mut() else {
+            return Err("no sign-in with gh is running".to_owned());
+        };
+        match sign_in.poll() {
+            Ok(false) => return Ok(None),
+            Ok(true) => *running = None,
+            Err(error) => {
+                *running = None;
+                return Err(error.to_string());
+            }
+        }
+    }
+    blocking(|| Ok(Account::system().status())).await.map(Some)
+}
+
+/// Stops the `gh auth login` that Settings started, if it still runs.
+#[tauri::command]
+async fn github_cancel_gh_sign_in(state: tauri::State<'_, GhSignInState>) -> Result<(), String> {
+    let running = state
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    // Stopping `gh` waits for it to exit, so it happens off the main thread.
+    blocking(move || {
+        drop(running);
+        Ok(())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn remove_marketplace(id: i64) -> Result<(), String> {
     with_catalog(move |catalog| catalog.remove(id)).await
@@ -191,6 +298,7 @@ async fn blocking<T: Send + 'static>(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(GhSignInState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -220,6 +328,16 @@ pub fn run() {
             set_plugin_enabled,
             install_plugin,
             uninstall_plugin,
+            discover_marketplaces,
+            github_status,
+            github_save_token,
+            github_sign_out,
+            github_check,
+            github_start_browser_sign_in,
+            github_poll_browser_sign_in,
+            github_start_gh_sign_in,
+            github_poll_gh_sign_in,
+            github_cancel_gh_sign_in,
             remove_marketplace,
         ])
         .run(tauri::generate_context!())

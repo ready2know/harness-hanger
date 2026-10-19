@@ -71,6 +71,12 @@ pub enum Error {
 
     #[error("Claude Code: {0}")]
     Harness(String),
+
+    #[error("GitHub: {0}")]
+    GitHub(String),
+
+    #[error("the system keychain: {0}")]
+    Keychain(String),
 }
 
 impl Error {

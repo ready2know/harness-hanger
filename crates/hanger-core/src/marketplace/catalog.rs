@@ -622,7 +622,7 @@ fn github_page(owner: &str, repo: &str, commit: &str, relative: &Path, is_dir: b
 }
 
 /// Percent-encodes one segment of a URL path.
-fn encode_segment(segment: &str) -> String {
+pub(crate) fn encode_segment(segment: &str) -> String {
     segment
         .bytes()
         .map(|byte| {

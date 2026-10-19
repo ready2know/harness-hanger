@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DownloadIcon, PlusIcon, StoreIcon } from '@lucide/vue'
+import { CompassIcon, DownloadIcon, PlusIcon, StoreIcon } from '@lucide/vue'
 import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
@@ -67,11 +67,17 @@ function openPreview(marketplace: MarketplaceSummary) {
       <div class="flex flex-col gap-1">
         <h2 class="font-medium">No marketplaces yet</h2>
         <p class="text-muted-foreground max-w-sm text-sm">
-          Add one from GitHub or from a local clone, or import the ones a harness such as Claude
-          Code already has.
+          Add one from GitHub or from a local clone, find public ones with Discover, or import the
+          ones a harness such as Claude Code already has.
         </p>
       </div>
       <div class="flex gap-2">
+        <Button as-child variant="outline">
+          <RouterLink :to="{ name: 'discover' }">
+            <CompassIcon />
+            Discover
+          </RouterLink>
+        </Button>
         <Button variant="outline" @click="importOpen = true">
           <DownloadIcon />
           Import

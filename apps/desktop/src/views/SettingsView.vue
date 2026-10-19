@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
+import GitHubSettings from '@/components/GitHubSettings.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useProjectsStore } from '@/stores/projects'
@@ -124,5 +125,7 @@ async function remove(id: number) {
         </li>
       </ul>
     </section>
+
+    <GitHubSettings />
   </div>
 </template>

@@ -95,6 +95,11 @@ flowchart LR
   folder. GitHub sources are cloned into harness-hanger's data directory; local folders are read
   in place. The catalog belongs to harness-hanger, so adding a marketplace does not change Claude
   Code's files.
+- **Discover** — Find public marketplaces on GitHub and add one in a single action, without
+  cloning it first. With a GitHub token, every repository with a marketplace manifest is searched;
+  without one, only repositories with the `claude-code-marketplace` topic. What earlier searches
+  found stays in a local index, which later searches match by plugin names and descriptions, even
+  offline.
 - **Import from Claude Code** — Bring in the marketplaces that Claude Code already knows, with
   their plugins, and the skills, agents, and commands that it loads outside plugins. A GitHub
   marketplace is copied from Claude Code's own clone, so it usually needs no network. Nothing in
@@ -118,7 +123,8 @@ flowchart LR
   [How harness-hanger changes your setup](#how-harness-hanger-changes-your-setup).
 - **CLI for scripts and agents** — The same features in the terminal. Every command prints
   machine-readable output with `--json`.
-- **Local only** — No account and no telemetry. All data stays on your machine.
+- **Local only** — No account and no telemetry. All data stays on your machine. harness-hanger
+  talks to GitHub only to clone marketplaces and when you use Discover.
 
 ### Planned
 
@@ -147,7 +153,8 @@ There are no prebuilt installers yet. Build the desktop app and the CLI from sou
 
 1. Start the app with `pnpm dev`.
 2. Open **Marketplaces** and click **Import** to bring in what Claude Code already has, or click
-   **Add marketplace** to add one from GitHub or from a local folder.
+   **Add marketplace** to add one from GitHub or from a local folder. Open **Discover** to find
+   public marketplaces on GitHub.
 3. Open a marketplace to preview its plugins, skills, agents, and commands.
 4. Use **Skills**, **Agents**, and **Plugins** in the sidebar to browse the whole catalog. Filter by
    status to see what Claude Code has enabled.
@@ -196,6 +203,8 @@ There are no prebuilt installers yet. Build the desktop app and the CLI from sou
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
 - At run time: `git`, to clone marketplaces from GitHub, and Claude Code's `claude` command, to
   switch, install, and uninstall plugins
+- Optional: a GitHub token or the `gh` command, so that Discover searches every marketplace on
+  GitHub
 
 ### Development
 
@@ -212,6 +221,8 @@ The CLI uses the same Rust core as the desktop app, and the same data directory.
 # Fill the catalog
 cargo run -p hanger-cli -- import claude-code --all                # import what Claude Code already has
 cargo run -p hanger-cli -- marketplace add anthropics/claude-code  # add one or more marketplaces
+cargo run -p hanger-cli -- marketplace search code review          # find public marketplaces on GitHub
+cargo run -p hanger-cli -- github login                            # sign in, so search covers all of GitHub
 
 # Look around
 cargo run -p hanger-cli -- marketplace ls
@@ -244,7 +255,10 @@ Commands:
 
 - `info` — show the version and where the Claude Code configuration is read from
 - `marketplace` — `add`, `ls`, `show`, and `rm` marketplaces in the catalog; `plugins` lists the
-  plugins of every marketplace and whether Claude Code has each one enabled
+  plugins of every marketplace and whether Claude Code has each one enabled; `search` finds public
+  marketplaces on GitHub, with `--refresh` to ask GitHub again and `--offline` to ask it nothing
+- `github` — `login` in the browser, or `--with-token` from standard input; `status`, `check`, and
+  `logout` for the GitHub account that `marketplace search` uses
 - `import` — import marketplaces and standalone components from a harness; with nothing named, it
   lists what can be imported
 - `project` — `add`, `ls`, and `rm` project folders; `show` what applies in a project, or globally
@@ -256,6 +270,8 @@ Extra flags and settings:
 
 - `--json` — machine-readable output for scripts and agents, on every command
 - `HARNESS_HANGER_DATA_DIR` — use another data directory
+- `GH_TOKEN` or `GITHUB_TOKEN` — the GitHub token for `marketplace search`; it wins over the token
+  in the system keychain and the login of `gh`
 - `CLAUDE_CONFIG_DIR` — read Claude Code's configuration from another directory instead of
   `~/.claude`
 
@@ -271,6 +287,10 @@ cargo install --path crates/hanger-cli --locked
 pnpm build                            # desktop app and installers
 cargo build --release -p hanger-cli   # CLI
 ```
+
+Signing in to GitHub in the browser uses harness-hanger's own OAuth App. A fork can use its own
+app, with Device Flow enabled, by setting its client ID as `HARNESS_HANGER_GITHUB_CLIENT_ID` when
+building.
 
 ### Repository Layout
 
@@ -292,6 +312,11 @@ docs/
 **"cannot find the claude command".** harness-hanger runs Claude Code's `claude` command to switch,
 install, and uninstall plugins. Install Claude Code, or add the folder that holds `claude` to your
 `PATH`.
+
+**Discover finds only a few marketplaces.** Without a GitHub token, Discover searches only
+repositories with the `claude-code-marketplace` topic. Sign in under **Settings → GitHub**, run
+`harness-hanger github login`, or set `GH_TOKEN`, to search every repository with a marketplace
+manifest.
 
 **Start over.** harness-hanger keeps its own data in one directory, and Claude Code's files are not
 in it. Delete the directory to clear the catalog and the project list:

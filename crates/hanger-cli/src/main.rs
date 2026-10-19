@@ -1,7 +1,13 @@
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
+use std::io::Read;
+use std::thread;
+use std::time::Duration;
+
+use hanger_core::github::{Account, AccountStatus, DevicePoll, TokenSource};
 use hanger_core::harness::claude_code::{ClaudeCode, Scope, ScopeState, UserPlugins};
 use hanger_core::harness::{Discovery, ImportItem, PluginStatus};
+use hanger_core::marketplace::discover::{Discover, DiscoverResults, Fetch, SearchMethod, TOPIC};
 use hanger_core::marketplace::{
     Catalog, CatalogPlugins, Component, MarketplaceDetails, MarketplaceSource, MarketplaceSummary,
     PluginSource,
@@ -32,6 +38,9 @@ enum Command {
     /// Manage project folders, and the Claude Code plugins that apply in each.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Sign in to GitHub, which lets `marketplace search` search every marketplace.
+    #[command(subcommand)]
+    Github(GithubCommand),
     /// Import marketplaces, with their plugins, and standalone skills from a harness, such as
     /// Claude Code. With nothing named to import, lists what can be imported.
     Import {
@@ -46,6 +55,26 @@ enum Command {
         #[arg(long, conflicts_with_all = ["marketplaces", "standalone"])]
         all: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+enum GithubCommand {
+    /// Show which GitHub account harness-hanger uses, without asking GitHub.
+    ///
+    /// The token comes from `GH_TOKEN` or `GITHUB_TOKEN`, else from the system keychain, where
+    /// `github login` saves it, else from the login of the `gh` command.
+    Status,
+    /// Ask GitHub which account the token in use belongs to.
+    Check,
+    /// Sign in in the browser, and save the token in the system keychain.
+    Login {
+        /// Read a token from standard input instead, such as a personal access token. It needs
+        /// no scopes.
+        #[arg(long)]
+        with_token: bool,
+    },
+    /// Forget the token saved in the system keychain.
+    Logout,
 }
 
 #[derive(Debug, Subcommand)]
@@ -119,6 +148,23 @@ enum MarketplaceCommand {
         /// The ID that `marketplace ls` shows.
         id: i64,
     },
+    /// Find public marketplaces on GitHub. Add one with `marketplace add owner/repo`.
+    ///
+    /// With a GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or the login of the `gh` command), every
+    /// repository with a marketplace manifest is searched. Without one, only repositories with
+    /// the claude-code-marketplace topic are. Marketplaces that earlier searches found match too,
+    /// by their plugins' names and descriptions. A search is asked again after an hour. With no
+    /// query, lists well-known marketplaces.
+    Search {
+        /// Words to look for, such as `code review`.
+        query: Vec<String>,
+        /// Ask GitHub even when the same search ran within the hour.
+        #[arg(long, conflicts_with = "offline")]
+        refresh: bool,
+        /// Send nothing to GitHub; search only what earlier searches found.
+        #[arg(long)]
+        offline: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -127,6 +173,7 @@ fn main() -> Result<()> {
         Command::Info => info(cli.json),
         Command::Marketplace(command) => marketplace(command, cli.json),
         Command::Project(command) => project(command, cli.json),
+        Command::Github(command) => github(command, cli.json),
         Command::Import {
             harness,
             marketplaces,
@@ -233,6 +280,78 @@ fn project(command: ProjectCommand, json: bool) -> Result<()> {
             claude.uninstall_from_project(&path, &plugin)?;
             done(format!("Uninstalled {plugin} from {}", path.display()))
         }
+    }
+}
+
+fn github(command: GithubCommand, json: bool) -> Result<()> {
+    let account = Account::system();
+    let status = match command {
+        GithubCommand::Status => account.status(),
+        GithubCommand::Check => {
+            let login = account.check()?;
+            if json {
+                return print_json(&serde_json::json!({ "login": login }));
+            }
+            println!("GitHub accepts the token in use; it belongs to {login}.");
+            return Ok(());
+        }
+        GithubCommand::Login { with_token: true } => {
+            let mut token = String::new();
+            std::io::stdin().read_to_string(&mut token)?;
+            account.save_token(&token)?
+        }
+        GithubCommand::Login { with_token: false } => {
+            let code = account.start_browser_sign_in()?;
+            eprintln!(
+                "Open {} and enter the code {}",
+                code.verification_uri, code.user_code
+            );
+            let mut interval = code.interval;
+            loop {
+                thread::sleep(Duration::from_secs(interval));
+                match account.poll_browser_sign_in(&code.device_code, interval)? {
+                    DevicePoll::Pending { interval: next } => interval = next,
+                    DevicePoll::Done { status } => break status,
+                }
+            }
+        }
+        GithubCommand::Logout => account.sign_out()?,
+    };
+    if json {
+        return print_json(&status);
+    }
+    print_account(&status);
+    Ok(())
+}
+
+fn print_account(status: &AccountStatus) {
+    let login = status
+        .login
+        .as_deref()
+        .map(|login| format!(" as {login}"))
+        .unwrap_or_default();
+    match &status.source {
+        Some(TokenSource::Env { variable }) => {
+            println!("GitHub: the token in {variable} from the environment");
+            if status.saved {
+                println!("It overrides the token saved in the system keychain.");
+            }
+        }
+        Some(TokenSource::Saved) => {
+            println!("GitHub: signed in{login}, with a token saved in the system keychain");
+        }
+        Some(TokenSource::Gh) => println!("GitHub: signed in through the gh command{login}"),
+        None => {
+            println!(
+                "GitHub: not signed in. `marketplace search` finds only repositories with the {TOPIC} topic."
+            );
+            println!(
+                "Sign in with `harness-hanger github login`, or with `gh auth login`, or set GH_TOKEN."
+            );
+        }
+    }
+    if let Some(error) = &status.keychain_error {
+        eprintln!("Cannot read the system keychain: {error}");
     }
 }
 
@@ -497,6 +616,22 @@ fn marketplace(command: MarketplaceCommand, json: bool) -> Result<()> {
             }
             print_plugins(&plugins);
         }
+        MarketplaceCommand::Search {
+            query,
+            refresh,
+            offline,
+        } => {
+            let fetch = match (refresh, offline) {
+                (true, _) => Fetch::Refresh,
+                (_, true) => Fetch::Offline,
+                _ => Fetch::WhenStale,
+            };
+            let results = Discover::open_default()?.search(&query.join(" "), fetch)?;
+            if json {
+                return print_json(&results);
+            }
+            print_discovered(&results);
+        }
         MarketplaceCommand::Rm { id } => {
             catalog.remove(id)?;
             if json {
@@ -632,6 +767,88 @@ fn print_plugins(catalog: &CatalogPlugins) {
             _ => format!("{}@{}", plugin.name, entry.marketplace),
         };
         println!("{status:<13}  {id}  {contents}");
+    }
+}
+
+fn print_discovered(results: &DiscoverResults) {
+    if let Some(problem) = &results.problem {
+        eprintln!("GitHub was not searched: {problem}");
+    }
+    let total = results
+        .total_count
+        .map(|total| format!(", {total} on GitHub"))
+        .unwrap_or_default();
+    match (results.method, &results.query) {
+        (SearchMethod::Curated, _) | (_, None) => println!("Well-known marketplaces"),
+        (SearchMethod::Code, Some(query)) => {
+            println!("Marketplaces that match \"{query}\"{total}");
+        }
+        (SearchMethod::Topic, Some(query)) => {
+            println!("Repositories with the {TOPIC} topic that match \"{query}\"{total}");
+            if !results.signed_in {
+                println!(
+                    "Sign in with `gh auth login`, or set GH_TOKEN, to search every marketplace on GitHub."
+                );
+            }
+        }
+    }
+    if results.from_cache
+        && let Some(searched_at) = &results.searched_at
+    {
+        println!("From a search at {searched_at}; --refresh asks GitHub again.");
+    }
+    if results.results.is_empty() {
+        println!("No marketplaces found.");
+    }
+    for found in &results.results {
+        let mut notes = Vec::new();
+        if found.curated {
+            notes.push("curated".to_owned());
+        }
+        if found.archived {
+            notes.push("archived".to_owned());
+        }
+        if let Some(id) = found.catalog_id {
+            notes.push(format!("in catalog (ID {id})"));
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", notes.join(", "))
+        };
+        println!();
+        let plugins = if found.plugin_count == 1 {
+            "1 plugin".to_owned()
+        } else {
+            format!("{} plugins", found.plugin_count)
+        };
+        println!(
+            "{:>8}  {}/{}  {plugins}{notes}",
+            format!("★ {}", found.stars),
+            found.owner,
+            found.repo,
+        );
+        if let Some(description) = &found.description {
+            println!("          {description}");
+        }
+        let mut facts = Vec::new();
+        facts.extend(found.license.clone());
+        facts.extend(
+            found
+                .pushed_at
+                .as_deref()
+                .and_then(|pushed| pushed.get(..10))
+                .map(|day| format!("updated {day}")),
+        );
+        if !found.copies.is_empty() {
+            facts.push(format!("{} copies left out", found.copies.len()));
+        }
+        if !facts.is_empty() {
+            println!("          {}", facts.join(" · "));
+        }
+        if !found.matching_plugins.is_empty() {
+            println!("          matching: {}", found.matching_plugins.join(", "));
+        }
     }
 }
 
